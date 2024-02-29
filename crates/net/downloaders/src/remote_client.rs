@@ -62,7 +62,7 @@ impl RemoteClient {
 
         let reqwest_client = ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc.to_string());
 
-        let provider = ethereum_json_rpc_client::EthJsonRcpClient::new(reqwest_client);
+        let provider = ethereum_json_rpc_client::EthJsonRpcClient::new(reqwest_client);
 
         const MAX_BLOCKS: usize = 10_000;
 
