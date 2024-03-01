@@ -6081,6 +6081,7 @@ dependencies = [
  "comfy-table",
  "confy",
  "crossterm",
+ "ethereum-json-rpc-client",
  "eyre",
  "fdlimit",
  "futures",

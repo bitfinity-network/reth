@@ -1,5 +1,6 @@
 //! CLI definition and entrypoint to executable
 
+use crate::utils;
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
@@ -41,7 +42,7 @@ pub struct Cli<Ext: RethCliExt = ()> {
         long,
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
+        default_value = SUPPORTED_CHAINS[5],
         value_parser = genesis_value_parser,
         global = true,
     )]
@@ -70,15 +71,28 @@ pub struct Cli<Ext: RethCliExt = ()> {
 impl<Ext: RethCliExt> Cli<Ext> {
     /// Execute the configured cli command.
     pub fn run(mut self) -> eyre::Result<()> {
+        let _guard = self.init_tracing()?;
+
+        let runner = CliRunner::default();
+
+        let rpc_url = self
+            .command
+            .rpc_url()
+            .ok_or_else(|| eyre::eyre!("RPC URL not found. This is a bug. Please report it."))?;
+
+        let chain = tokio::runtime::Runtime::new()?.block_on(utils::bitfinity_genesis(rpc_url))?;
+
+        self.chain = chain.clone();
+
         // add network name to logs dir
         self.logs.log_file_directory =
             self.logs.log_file_directory.join(self.chain.chain.to_string());
 
-        let _guard = self.init_tracing()?;
-
-        let runner = CliRunner::default();
         match self.command {
-            Commands::Node(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::Node(mut command) => runner.run_command_until_exit(|ctx| {
+                command.chain = self.chain.clone();
+                command.execute(ctx)
+            }),
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
@@ -158,6 +172,15 @@ impl<Ext: RethCliExt> Commands<Ext> {
     pub fn set_node_extension(&mut self, ext: Ext::Node) {
         if let Commands::Node(command) = self {
             command.ext = ext
+        }
+    }
+
+    /// Returns the rpc url for the node.
+    pub fn rpc_url(&self) -> Option<String> {
+        if let Commands::Node(command) = self {
+            Some(command.bitfinity.rpc_url.clone())
+        } else {
+            None
         }
     }
 }

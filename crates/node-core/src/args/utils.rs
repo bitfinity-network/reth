@@ -20,7 +20,8 @@ use reth_primitives::{DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA};
 pub const SUPPORTED_CHAINS: &[&str] = &["base", "base-goerli", "base-sepolia"];
 #[cfg(not(feature = "optimism"))]
 /// Chains supported by reth. First value should be used as the default.
-pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "goerli", "holesky", "dev"];
+pub const SUPPORTED_CHAINS: &[&str] =
+    &["mainnet", "sepolia", "goerli", "holesky", "dev", "bitfinity"];
 
 /// Helper to parse a [Duration] from seconds
 pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::ParseIntError> {
@@ -77,6 +78,8 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
         "holesky" => HOLESKY.clone(),
         #[cfg(not(feature = "optimism"))]
         "dev" => DEV.clone(),
+        #[cfg(not(feature = "optimism"))]
+        "bitfinity" => DEV.clone(),
         #[cfg(feature = "optimism")]
         "base_goerli" | "base-goerli" => BASE_GOERLI.clone(),
         #[cfg(feature = "optimism")]
