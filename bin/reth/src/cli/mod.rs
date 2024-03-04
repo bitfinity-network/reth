@@ -85,12 +85,11 @@ impl<Ext: RethCliExt> Cli<Ext> {
         self.chain = chain.clone();
 
         // add network name to logs dir
-        self.logs.log_file_directory =
-            self.logs.log_file_directory.join(self.chain.chain.to_string());
+        self.logs.log_file_directory = self.logs.log_file_directory.join(chain.chain.to_string());
 
         match self.command {
             Commands::Node(mut command) => runner.run_command_until_exit(|ctx| {
-                command.chain = self.chain.clone();
+                command.chain = chain;
                 command.execute(ctx)
             }),
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
