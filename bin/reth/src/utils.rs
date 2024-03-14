@@ -188,7 +188,7 @@ impl ListFilter {
 
 /// Bitfinity Genesis
 pub async fn bitfinity_genesis(url: String) -> Result<Arc<ChainSpec>> {
-    let client = ethereum_json_rpc_client::EthJsonRcpClient::new(ReqwestClient::new(url));
+    let client = ethereum_json_rpc_client::EthJsonRpcClient::new(ReqwestClient::new(url));
 
     let chain_id = client.get_chain_id().await.map_err(|e| eyre::eyre!(e))?;
 
