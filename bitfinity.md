@@ -27,24 +27,23 @@ Before running the node, you will need to have a `bitfinity.spec.json` file in t
 To run the node, use the following command:
 
 ```sh
-reth node -vvvvv --chain bitfinity.spec.json --http --http.port 8080 -d -r https://testnet.bitfinity.network -i 30 -b 10
+reth node -vvvvv --chain bitfinity.spec.json --http --http.port 8080 -d -r https://testnet.bitfinity.network -i 30 -b 100 --datadir ./target/reth
 ```
 
 
 With cargo: 
 
 ```sh
-cargo run -p reth -- node -vvvv --chain bitfinity.spec.json --http --http.port 8080 -d -r https://orca-app-5yyst.ondigitalocean.app -i 30 -b 10
+cargo run -p reth -- node -vvvv --chain bitfinity.spec.json --http --http.port 8080 -d -r https://orca-app-5yyst.ondigitalocean.app -i 30 -b 100  --datadir ./target/reth
 ```
 
-evm-block-extractor url: https://orca-app-5yyst.ondigitalocean.app/
 
 ### Querying the node
 
 You can query the node using the JSON-RPC API. For example, to get the block number, you can use the following command:
 
 ```sh
-curl -X POST --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' http://localhost:8080
+curl -X POST -H 'content-Type: application/json' --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' http://localhost:8080
 ```
 
 ### Running the node with Docker
