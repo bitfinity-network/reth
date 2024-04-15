@@ -12,19 +12,23 @@ use clap::Parser;
 use eyre::Context;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconConsensus;
+use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals};
 use reth_config::Config;
 use reth_db::database_metrics::DatabaseMetadata;
 
 use reth_db::{database::Database, init_db, mdbx::DatabaseArguments};
 use reth_downloaders::{
+    bitfinity_evm_client::{BitfinityEvmClient, CertificateCheckSettings},
     bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder, bitfinity_evm_client::{CertificateCheckSettings, BitfinityEvmClient},
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_interfaces::consensus::Consensus;
 use reth_node_core::{args::BitfinityArgs, events::node::NodeEvent, init::init_genesis};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{ChainSpec, B256};
+use reth_provider::providers::BlockchainProvider;
 use reth_provider::{BlockNumReader, HeaderSyncMode, ProviderFactory};
+use reth_revm::EvmProcessorFactory;
 use reth_stages::{
     prelude::*,
     stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage, TotalDifficultyStage},
@@ -137,7 +141,7 @@ impl ImportCommand {
                 start_block,
                 self.bitfinity.end_block,
                 self.bitfinity.batch_size,
-                Some(CertificateCheckSettings{
+                Some(CertificateCheckSettings {
                     evmc_principal: self.bitfinity.evmc_principal.clone(),
                     ic_root_key: self.bitfinity.ic_root_key.clone(),
                 }),
@@ -180,6 +184,8 @@ impl ImportCommand {
         // Run pipeline
         debug!(target: "reth::cli", "Starting sync pipeline");
         pipeline.run().await?;
+
+        self.update_chain_info(provider_factory, &consensus)?;
 
         info!(target: "reth::cli", "Finishing up");
         Ok(())
@@ -261,6 +267,31 @@ impl ImportCommand {
     fn load_config(&self, config_path: PathBuf) -> eyre::Result<Config> {
         confy::load_path::<Config>(config_path.clone())
             .wrap_err_with(|| format!("Could not load config file {:?}", config_path))
+    }
+
+    fn update_chain_info<DB, C>(
+        &self,
+        provider_factory: ProviderFactory<DB>,
+        consensus: &Arc<C>,
+    ) -> eyre::Result<()>
+    where
+        DB: Database + Clone + Unpin + 'static,
+        C: Consensus + 'static,
+    {
+        let executor = EvmProcessorFactory::new(self.chain.clone(), EthEvmConfig::default());
+
+        let blockchain_tree =
+            ShareableBlockchainTree::new(reth_blockchain_tree::BlockchainTree::new(
+                TreeExternals::new(provider_factory.clone(), consensus.clone(), executor),
+                BlockchainTreeConfig::default(),
+                None,
+            )?);
+
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone(), blockchain_tree)?;
+
+        blockchain_db.update_chain_info()?;
+
+        Ok(())
     }
 }
 

@@ -1,4 +1,5 @@
 use clap::{arg, Args};
+use std::path::PathBuf;
 
 /// Public key of the IC main net.
 /// IC advices to use a hardcoded value instead of querying it to avoid main-in-the middle attacks.
@@ -34,4 +35,14 @@ pub struct BitfinityArgs {
     /// Root key for the IC network
     #[arg(long, value_name = "IC_ROOT_KEY", default_value = IC_MAINNET_KEY)]
     pub ic_root_key: String,
+
+    /// Path to an identity PEM file to perform state recovery IC calls.
+    /// The identity must have permissions to stop the EVM canister and to
+    /// update the blockchain.
+    #[arg(long = "identity-file", value_name = "IDENTITY_FILE")]
+    pub identity_file: PathBuf,
+
+    /// Network url
+    #[arg(long = "network-url", short('n'))]
+    pub evm_client_network_url: String,
 }

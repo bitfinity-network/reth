@@ -170,8 +170,13 @@ reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie" }
 
 # revm
-revm = { version = "6.0", features = ["std", "secp256k1"], default-features = false }
-revm-primitives = { version = "2.0", features = ["std"], default-features = false }
+revm = { version = "6.1", features = [
+    "std",
+    "secp256k1",
+], default-features = false }
+revm-primitives = { version = "2.0", features = [
+    "std",
+], default-features = false }
 revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "ac63f06" }
 
 # eth
@@ -219,7 +224,7 @@ strum = "0.26"
 rayon = "1.7"
 itertools = "0.12"
 parking_lot = "0.12"
-metrics = "0.21.1" # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
+metrics = "0.21.1"                                    # Needed for `metrics-macro` to resolve the crate using `::metrics` notation
 hex-literal = "0.4"
 once_cell = "1.17"
 syn = "2.0"
@@ -274,16 +279,20 @@ test-fuzz = "5"
 
 # Bitfinity Deps
 candid = "0.10"
-did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", tag = "v0.13.x" }
-ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.13.x", features = [
+did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", branch = "add-endpoint" }
+ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", branch = "add-endpoint", features = [
     "reqwest",
 ] }
 ic-cbor = "2.3"
 ic-certificate-verification = "2.3"
 ic-certification = "2.3"
 hex = "0.4"
-lightspeed_scheduler = { version = "0.57.0", features = ["tracing"] }
+lightspeed_scheduler = { version = "0.58.0", features = ["tracing"] }
 rlp = "0.5"
+evm-canister-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "evm-canister-client", features = [
+    "ic-agent-client",
+], branch = "add-endpoint" }
+
 
 [workspace.metadata.cargo-udeps.ignore]
 # ignored because this is mutually exclusive with the optimism payload builder via feature flags

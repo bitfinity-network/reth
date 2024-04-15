@@ -1,5 +1,6 @@
 //! CLI definition and entrypoint to executable
 
+use crate::commands::export_state;
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
@@ -88,6 +89,9 @@ impl<Ext: RethCliExt> Cli<Ext> {
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::ExportState(command) => {
+                runner.run_command_until_exit(|ctx| command.execute(ctx))
+            }
         }
     }
 
@@ -121,7 +125,7 @@ pub fn run() -> eyre::Result<()> {
 pub enum Commands<Ext: RethCliExt = ()> {
     /// Start the node
     #[command(name = "node")]
-    Node(node::NodeCommand<Ext>),
+    Node(Box<node::NodeCommand<Ext>>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(init_cmd::InitCommand),
@@ -149,6 +153,9 @@ pub enum Commands<Ext: RethCliExt = ()> {
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command),
+    /// Export state to revm
+    #[command(name = "export-state")]
+    ExportState(export_state::Command),
 }
 
 impl<Ext: RethCliExt> Commands<Ext> {

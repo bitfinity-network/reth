@@ -341,7 +341,7 @@ tables! {
     /// Stores the current state of an [`Account`] indexed with `keccak256Address`
     /// This table is in preparation for merkelization and calculation of state root.
     /// We are saving whole account data as it is needed for partial update when
-    /// part of storage is changed. Benefit for merkelization is that hashed addresses are sorted.
+    /// part of storage is changed. Benefit for merkelization is that hashed addresses are sorted.§
     table HashedAccount<Key = B256, Value = Account>;
 
     /// Stores the current storage values indexed with `keccak256Address` and

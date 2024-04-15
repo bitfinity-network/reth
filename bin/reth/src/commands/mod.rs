@@ -3,6 +3,7 @@
 pub mod config_cmd;
 pub mod db;
 pub mod debug_cmd;
+pub mod export_state;
 pub mod import;
 pub mod init_cmd;
 pub mod node;

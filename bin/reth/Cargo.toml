@@ -125,6 +125,18 @@ rayon.workspace = true
 boyer-moore-magiclen = "0.2.16"
 lightspeed_scheduler = { workspace = true, features = ["tracing"] }
 
+evm-canister-client = { workspace = true, features = ["ic-agent-client"] }
+# Bitfinity deps
+candid.workspace = true
+did.workspace = true
+ethereum-json-rpc-client = { workspace = true, features = ["reqwest"] }
+hex.workspace = true
+ic-cbor.workspace = true
+ic-certificate-verification.workspace = true
+ic-certification.workspace = true
+rlp.workspace = true
+
+
 [target.'cfg(not(windows))'.dependencies]
 jemallocator = { version = "0.5.0", optional = true }
 
