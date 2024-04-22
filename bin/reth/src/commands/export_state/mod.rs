@@ -104,13 +104,13 @@ impl Command {
 
         // Sync with the chain
         loop {
-            info!(target: "reth::cli", chain=%chain.chain, latest_block=%latest_block, "Syncing with the chain");
+            info!(target: "reth::cli", latest_block=%latest_block, "Syncing with the chain");
 
             import.import(Config::default(), provider_factory.clone(), db.clone().into()).await?;
 
             let best_block = provider_factory.last_block_number()? + 1;
 
-            info!(target: "reth::cli", chain=%chain.chain, latest_block=%latest_block, best_block=%best_block, "Waiting for best_block to reach latest_block");
+            info!(target: "reth::cli", latest_block=%latest_block, best_block=%best_block, "Waiting for best_block to reach latest_block");
 
             if best_block >= latest_block {
                 break;
@@ -131,9 +131,9 @@ impl Command {
         //
         {
             // Reset the evm
-            info!(target: "reth::cli", chain=%chain.chain, "Resetting evm");
+            info!(target: "reth::cli", "Resetting evm");
             evm_client.reset_state().await??;
-            info!(target: "reth::cli", chain=%chain.chain, "Evm reset");
+            info!(target: "reth::cli", "Evm reset");
         }
 
         let mut provider = provider_factory.provider()?;
@@ -150,7 +150,7 @@ impl Command {
         // We need to iterate through all the accounts and retrieve their storage tries and populate the AccountInfo
         let mut accounts = AccountInfoMap::new();
 
-        info!(target: "reth::cli", chain=%chain.chain, "Recovering storage tries");
+        info!(target: "reth::cli", "Recovering storage tries");
 
         let mut batch_size = 0;
         let batch_limit = 500;
@@ -180,13 +180,13 @@ impl Command {
             info!(target: "reth::cli",address=%address, "Recovering storage tries");
 
             accounts.insert((*address).into(), account);
-            info!(target: "reth::cli", chain=%chain.chain, address=%address, "Storage tries recovered");
+            info!(target: "reth::cli", address=%address, "Storage tries recovered");
 
-            info!(target: "reth::cli", chain=%chain.chain, batch_size=%batch_size, "Processing batch of accounts");
+            info!(target: "reth::cli", batch_size=%batch_size, "Processing batch of accounts");
             batch_size += 1;
 
             if batch_size == batch_limit {
-                info!(target: "reth::cli", chain=%chain.chain, "Processing batch of accounts");
+                info!(target: "reth::cli", "Processing batch of accounts");
                 Self::process_account_info(&evm_client, &mut accounts).await?;
                 accounts.clear();
                 batch_size = 0;
@@ -195,7 +195,7 @@ impl Command {
             entry = plain_account_cursor.next()?;
         }
 
-        info!(target: "reth::cli", chain=%chain.chain, "Processing last batch of accounts");
+        info!(target: "reth::cli", "Processing last batch of accounts");
 
         if !accounts.is_empty() {
             Self::process_account_info(&evm_client, &mut accounts).await?;
