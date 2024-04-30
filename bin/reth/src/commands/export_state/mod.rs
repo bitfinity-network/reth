@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
@@ -162,13 +162,14 @@ impl Command {
 
             let mut storage = BTreeMap::new();
 
-            while let Some((_, entry)) = plain_storage_cursor.seek_exact(*address)? {
-                let StorageEntry { key, value } = entry;
-                storage.insert(
-                    did::H256::from_slice(&key.0),
-                    did::U256::from_little_endian(&value.as_le_bytes_trimmed()),
-                );
-            }
+            // while let Some((_, entry)) = plain_storage_cursor.seek_exact(*address)? {
+            //     info!("Recovering storage for account {}", address);
+            //     let StorageEntry { key, value } = entry;
+            //     storage.insert(
+            //         did::H256::from_slice(&key.0),
+            //         did::U256::from_little_endian(&value.as_le_bytes_trimmed()),
+            //     );
+            // }
 
             let account = RawAccountInfo {
                 nonce: account.nonce.into(),
@@ -176,6 +177,8 @@ impl Command {
                 bytecode: bytecode.map(Into::into),
                 storage: storage.into_iter().collect_vec(),
             };
+
+            info!(target: "reth::cli", "Account Address: {} Info: {:?}", address, account);
 
             info!(target: "reth::cli",address=%address, "Recovering storage tries");
 
@@ -208,23 +211,9 @@ impl Command {
         client: &EvmCanisterClient<impl CanisterClient>,
         accounts: &mut AccountInfoMap,
     ) -> eyre::Result<()> {
-        info!(target: "reth::cli","Processing account info");
+        info!(target: "reth::cli", "Processing account info");
 
-        const BATCH_SIZE: usize = 100; // Adjust the batch size as needed
-
-        while !accounts.is_empty() {
-            let batch_end = accounts.iter().nth(BATCH_SIZE).map_or_else(
-                || accounts.last_key_value().expect("msg").0.clone(),
-                |entry| entry.0.clone(),
-            );
-            let batch = accounts.split_off(&batch_end);
-
-            info!(target: "reth::cli", "Processing batch of accounts");
-
-            client.update_state(batch).await??;
-
-            info!(target: "reth::cli","Processed batch of accounts");
-        }
+        client.update_state(accounts.clone()).await??;
 
         Ok(())
     }
