@@ -7453,6 +7453,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "derive_more",
+ "ethereum-json-rpc-client",
  "futures",
  "http",
  "http-body",
