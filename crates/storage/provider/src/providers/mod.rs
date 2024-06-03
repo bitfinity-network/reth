@@ -72,7 +72,7 @@ pub use consistent_view::{ConsistentDbView, ConsistentViewError};
 #[allow(missing_debug_implementations)]
 pub struct BlockchainProvider<DB> {
     /// Provider type used to access the database.
-    database: ProviderFactory<DB>,
+    pub database: ProviderFactory<DB>,
     /// The blockchain tree instance.
     tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
@@ -621,7 +621,7 @@ where
 
         if let Some(block) = self.tree.pending_block_num_hash() {
             if let Ok(pending) = self.tree.pending_state_provider(block.hash) {
-                return self.pending_with_provider(pending)
+                return self.pending_with_provider(pending);
             }
         }
 
@@ -631,7 +631,7 @@ where
 
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         if let Some(state) = self.tree.find_pending_state_provider(block_hash) {
-            return Ok(Some(self.pending_with_provider(state)?))
+            return Ok(Some(self.pending_with_provider(state)?));
         }
         Ok(None)
     }
