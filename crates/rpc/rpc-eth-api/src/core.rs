@@ -688,7 +688,7 @@ where
     async fn gas_price(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
         // return Ok(EthFees::gas_price(self).await?)
-        BitfinityEvmRpc::gas_price(self).await
+        crate::helpers::bitfinity_evm_rpc::BitfinityEvmRpc::gas_price(self).await
     }
 
     /// Handler for: `eth_getAccount`
@@ -705,7 +705,7 @@ where
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
         // return Ok(EthFees::suggested_priority_fee(self).await?)
-        BitfinityEvmRpc::max_priority_fee_per_gas(self).await
+        crate::helpers::bitfinity_evm_rpc::BitfinityEvmRpc::max_priority_fee_per_gas(self).await
     }
 
     /// Handler for: `eth_blobBaseFee`
@@ -773,7 +773,7 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransaction");
         // Ok(EthTransactions::send_raw_transaction(self, tx).await?)
-        BitfinityEvmRpc::send_raw_transaction(self, tx).await
+        crate::helpers::bitfinity_evm_rpc::BitfinityEvmRpc::send_raw_transaction(self, tx).await
     }
 
     /// Handler for: `eth_sign`

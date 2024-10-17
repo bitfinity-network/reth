@@ -599,7 +599,7 @@ tracy-client = "0.17.3"
 # Bitfinity Deps
 async-channel = "2"
 candid = "0.10"
-did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", features = ["alloy-primitives-07"], tag = "v0.34.x" }
+did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", features = ["alloy-primitives-08"], tag = "v0.34.x" }
 dirs = "5.0.1"
 ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", tag = "v0.34.x", features = [
     "reqwest",

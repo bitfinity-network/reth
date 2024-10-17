@@ -118,7 +118,6 @@ rand = { workspace = true }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 revm-primitives.workspace = true
-tempfile.workspace = true
 
 [features]
 default = ["jemalloc"]

@@ -149,7 +149,7 @@ pub trait EthCall: Call + LoadPendingBlock {
                         apply_state_overrides(state_overrides, &mut db)?;
                     }
 
-                    if (total_gas_limit - gas_used) < block_env.gas_limit.to() {
+                    if (total_gas_limit - gas_used) < block_env.gas_limit.to::<u64>() {
                         return Err(
                             EthApiError::Other(Box::new(EthSimulateError::GasLimitReached)).into()
                         )

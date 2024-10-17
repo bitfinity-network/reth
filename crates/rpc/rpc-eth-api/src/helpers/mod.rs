@@ -63,6 +63,7 @@ pub trait FullEthApi:
     + EthFees
     + Trace
     + LoadReceipt
+    + crate::helpers::bitfinity_evm_rpc::BitfinityEvmRpc
 {
 }
 
@@ -76,5 +77,6 @@ impl<T> FullEthApi for T where
         + EthFees
         + Trace
         + LoadReceipt
+        + crate::helpers::bitfinity_evm_rpc::BitfinityEvmRpc
 {
 }

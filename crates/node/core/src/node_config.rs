@@ -159,6 +159,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
             datadir: DatadirArgs::default(),
+            bitfinity_import_arg: Default::default(),
         }
     }
 
@@ -450,6 +451,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             dev: self.dev,
             pruning: self.pruning.clone(),
             datadir: self.datadir.clone(),
+            bitfinity_import_arg: self.bitfinity_import_arg.clone(),
         }
     }
 }
