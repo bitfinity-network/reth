@@ -3,7 +3,6 @@
 //! Previously version of Apache licenced [`ethereum-forkid`](https://crates.io/crates/ethereum-forkid).
 
 use crate::Head;
-#[cfg(not(feature = "std"))]
 use alloc::{
     collections::{BTreeMap, BTreeSet},
     vec::Vec,
@@ -22,8 +21,6 @@ use crc::*;
 use proptest_derive::Arbitrary as PropTestArbitrary;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "std")]
-use std::collections::{BTreeMap, BTreeSet};
 
 const CRC_32_IEEE: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 const TIMESTAMP_BEFORE_ETHEREUM_MAINNET: u64 = 1_300_000_000;
@@ -261,32 +258,24 @@ impl ForkFilter {
     }
 
     fn set_head_priv(&mut self, head: Head) -> Option<ForkTransition> {
-        let recompute_cache = {
-            let head_in_past = match self.cache.epoch_start {
-                ForkFilterKey::Block(epoch_start_block) => head.number < epoch_start_block,
-                ForkFilterKey::Time(epoch_start_time) => head.timestamp < epoch_start_time,
-            };
-            let head_in_future = match self.cache.epoch_end {
-                Some(ForkFilterKey::Block(epoch_end_block)) => head.number >= epoch_end_block,
-                Some(ForkFilterKey::Time(epoch_end_time)) => head.timestamp >= epoch_end_time,
-                None => false,
-            };
-
-            head_in_past || head_in_future
+        let head_in_past = match self.cache.epoch_start {
+            ForkFilterKey::Block(epoch_start_block) => head.number < epoch_start_block,
+            ForkFilterKey::Time(epoch_start_time) => head.timestamp < epoch_start_time,
         };
-
-        // recompute the cache
-        let transition = if recompute_cache {
-            let past = self.current();
-            self.cache = Cache::compute_cache(&self.forks, head);
-            Some(ForkTransition { current: self.current(), past })
-        } else {
-            None
+        let head_in_future = match self.cache.epoch_end {
+            Some(ForkFilterKey::Block(epoch_end_block)) => head.number >= epoch_end_block,
+            Some(ForkFilterKey::Time(epoch_end_time)) => head.timestamp >= epoch_end_time,
+            None => false,
         };
 
         self.head = head;
 
-        transition
+        // Recompute the cache if the head is in the past or future epoch.
+        (head_in_past || head_in_future).then(|| {
+            let past = self.current();
+            self.cache = Cache::compute_cache(&self.forks, head);
+            ForkTransition { current: self.current(), past }
+        })
     }
 
     /// Set the current head.

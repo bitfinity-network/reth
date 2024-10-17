@@ -1,12 +1,8 @@
 //! Network config support
 
-use crate::{
-    error::NetworkError,
-    import::{BlockImport, ProofOfStakeBlockImport},
-    transactions::TransactionsManagerConfig,
-    NetworkHandle, NetworkManager,
-};
-use reth_chainspec::{ChainSpec, MAINNET};
+use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
@@ -14,10 +10,16 @@ use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_primitives::{ForkFilter, Head};
-use reth_provider::{BlockReader, HeaderProvider};
+use reth_storage_api::{noop::NoopBlockReader, BlockNumReader, BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
-use std::{collections::HashSet, net::SocketAddr, sync::Arc};
+
+use crate::{
+    error::NetworkError,
+    import::{BlockImport, ProofOfStakeBlockImport},
+    transactions::TransactionsManagerConfig,
+    NetworkHandle, NetworkManager,
+};
 
 // re-export for convenience
 use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocols};
@@ -54,8 +56,8 @@ pub struct NetworkConfig<C> {
     pub peers_config: PeersConfig,
     /// How to configure the [`SessionManager`](crate::session::SessionManager).
     pub sessions_config: SessionsConfig,
-    /// The chain spec
-    pub chain_spec: Arc<ChainSpec>,
+    /// The chain id
+    pub chain_id: u64,
     /// The [`ForkFilter`] to use at launch for authenticating sessions.
     ///
     /// See also <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
@@ -79,6 +81,8 @@ pub struct NetworkConfig<C> {
     pub tx_gossip_disabled: bool,
     /// How to instantiate transactions manager.
     pub transactions_manager_config: TransactionsManagerConfig,
+    /// The NAT resolver for external IP
+    pub nat: Option<NatResolver>,
 }
 
 // === impl NetworkConfig ===
@@ -97,8 +101,19 @@ impl NetworkConfig<()> {
 
 impl<C> NetworkConfig<C> {
     /// Create a new instance with all mandatory fields set, rest is field with defaults.
-    pub fn new(client: C, secret_key: SecretKey) -> Self {
+    pub fn new(client: C, secret_key: SecretKey) -> Self
+    where
+        C: ChainSpecProvider<ChainSpec: Hardforks>,
+    {
         NetworkConfig::builder(secret_key).build(client)
+    }
+
+    /// Apply a function to the config.
+    pub fn apply<F>(self, f: F) -> Self
+    where
+        F: FnOnce(Self) -> Self,
+    {
+        f(self)
     }
 
     /// Sets the config to use for the discovery v4 protocol.
@@ -121,16 +136,27 @@ impl<C> NetworkConfig<C> {
 
 impl<C> NetworkConfig<C>
 where
+    C: BlockNumReader + 'static,
+{
+    /// Convenience method for calling [`NetworkManager::new`].
+    pub async fn manager(self) -> Result<NetworkManager, NetworkError> {
+        NetworkManager::new(self).await
+    }
+}
+
+impl<C> NetworkConfig<C>
+where
     C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
 {
     /// Starts the networking stack given a [`NetworkConfig`] and returns a handle to the network.
     pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {
         let client = self.client.clone();
-        let (handle, network, _txpool, eth) =
-            NetworkManager::builder(self).await?.request_handler(client).split_with_handle();
+        let (handle, network, _txpool, eth) = NetworkManager::builder::<C>(self)
+            .await?
+            .request_handler::<C>(client)
+            .split_with_handle();
 
         tokio::task::spawn(network);
-        // TODO: tokio::task::spawn(txpool);
         tokio::task::spawn(eth);
         Ok(handle)
     }
@@ -157,8 +183,6 @@ pub struct NetworkConfigBuilder {
     peers_config: Option<PeersConfig>,
     /// How to configure the sessions manager
     sessions_config: Option<SessionsConfig>,
-    /// The network's chain spec
-    chain_spec: Arc<ChainSpec>,
     /// The default mode of the network.
     network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
@@ -175,6 +199,8 @@ pub struct NetworkConfigBuilder {
     block_import: Option<Box<dyn BlockImport>>,
     /// How to instantiate transactions manager.
     transactions_manager_config: TransactionsManagerConfig,
+    /// The NAT resolver for external IP
+    nat: Option<NatResolver>,
 }
 
 // === impl NetworkConfigBuilder ===
@@ -198,7 +224,6 @@ impl NetworkConfigBuilder {
             listener_addr: None,
             peers_config: None,
             sessions_config: None,
-            chain_spec: MAINNET.clone(),
             network_mode: Default::default(),
             executor: None,
             hello_message: None,
@@ -207,6 +232,7 @@ impl NetworkConfigBuilder {
             tx_gossip_disabled: false,
             block_import: None,
             transactions_manager_config: Default::default(),
+            nat: None,
         }
     }
 
@@ -226,12 +252,6 @@ impl NetworkConfigBuilder {
     /// Returns the configured [`SecretKey`], from which the node's identity is derived.
     pub const fn secret_key(&self) -> &SecretKey {
         &self.secret_key
-    }
-
-    /// Sets the chain spec.
-    pub fn chain_spec(mut self, chain_spec: Arc<ChainSpec>) -> Self {
-        self.chain_spec = chain_spec;
-        self
     }
 
     /// Sets the [`NetworkMode`].
@@ -332,6 +352,18 @@ impl NetworkConfigBuilder {
         self
     }
 
+    /// Sets the discovery port to an unused port.
+    /// This is useful for testing.
+    pub fn with_unused_discovery_port(self) -> Self {
+        self.discovery_port(0)
+    }
+
+    /// Sets the listener port to an unused port.
+    /// This is useful for testing.
+    pub fn with_unused_listener_port(self) -> Self {
+        self.listener_port(0)
+    }
+
     /// Sets the external ip resolver to use for discovery v4.
     ///
     /// If no [`Discv4ConfigBuilder`] is set via [`Self::discovery`], this will create a new one.
@@ -342,6 +374,7 @@ impl NetworkConfigBuilder {
         self.discovery_v4_builder
             .get_or_insert_with(Discv4Config::builder)
             .external_ip_resolver(Some(resolver));
+        self.nat = Some(resolver);
         self
     }
 
@@ -373,10 +406,15 @@ impl NetworkConfigBuilder {
         self.boot_nodes(sepolia_nodes())
     }
 
-    /// Sets the boot nodes.
+    /// Sets the boot nodes to use to bootstrap the configured discovery services (discv4 + discv5).
     pub fn boot_nodes<T: Into<TrustedPeer>>(mut self, nodes: impl IntoIterator<Item = T>) -> Self {
         self.boot_nodes = nodes.into_iter().map(Into::into).collect();
         self
+    }
+
+    /// Returns an iterator over all configured boot nodes.
+    pub fn boot_nodes_iter(&self) -> impl Iterator<Item = &TrustedPeer> + '_ {
+        self.boot_nodes.iter()
     }
 
     /// Disable the DNS discovery.
@@ -385,9 +423,15 @@ impl NetworkConfigBuilder {
         self
     }
 
+    // Disable nat
+    pub const fn disable_nat(mut self) -> Self {
+        self.nat = None;
+        self
+    }
+
     /// Disables all discovery.
     pub fn disable_discovery(self) -> Self {
-        self.disable_discv4_discovery().disable_dns_discovery()
+        self.disable_discv4_discovery().disable_dns_discovery().disable_nat()
     }
 
     /// Disables all discovery if the given condition is true.
@@ -443,11 +487,20 @@ impl NetworkConfigBuilder {
 
     /// Convenience function for creating a [`NetworkConfig`] with a noop provider that does
     /// nothing.
-    #[cfg(any(test, feature = "test-utils"))]
-    pub fn build_with_noop_provider(
+    pub fn build_with_noop_provider<ChainSpec>(
         self,
-    ) -> NetworkConfig<reth_provider::test_utils::NoopProvider> {
-        self.build(reth_provider::test_utils::NoopProvider::default())
+        chain_spec: Arc<ChainSpec>,
+    ) -> NetworkConfig<NoopBlockReader<ChainSpec>>
+    where
+        ChainSpec: EthChainSpec + Hardforks + 'static,
+    {
+        self.build(NoopBlockReader::new(chain_spec))
+    }
+
+    /// Sets the NAT resolver for external IP.
+    pub const fn add_nat(mut self, nat: Option<NatResolver>) -> Self {
+        self.nat = nat;
+        self
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]
@@ -456,8 +509,12 @@ impl NetworkConfigBuilder {
     /// The given client is to be used for interacting with the chain, for example fetching the
     /// corresponding block for a given block hash we receive from a peer in the status message when
     /// establishing a connection.
-    pub fn build<C>(self, client: C) -> NetworkConfig<C> {
+    pub fn build<C>(self, client: C) -> NetworkConfig<C>
+    where
+        C: ChainSpecProvider<ChainSpec: Hardforks>,
+    {
         let peer_id = self.get_peer_id();
+        let chain_spec = client.chain_spec();
         let Self {
             secret_key,
             mut dns_discovery_config,
@@ -468,7 +525,6 @@ impl NetworkConfigBuilder {
             listener_addr,
             peers_config,
             sessions_config,
-            chain_spec,
             network_mode,
             executor,
             hello_message,
@@ -477,6 +533,7 @@ impl NetworkConfigBuilder {
             tx_gossip_disabled,
             block_import,
             transactions_manager_config,
+            nat,
         } = self;
 
         discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
@@ -494,12 +551,12 @@ impl NetworkConfigBuilder {
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
         hello_message.port = listener_addr.port();
 
-        let head = head.unwrap_or(Head {
+        let head = head.unwrap_or_else(|| Head {
             hash: chain_spec.genesis_hash(),
             number: 0,
-            timestamp: chain_spec.genesis.timestamp,
-            difficulty: chain_spec.genesis.difficulty,
-            total_difficulty: chain_spec.genesis.difficulty,
+            timestamp: chain_spec.genesis().timestamp,
+            difficulty: chain_spec.genesis().difficulty,
+            total_difficulty: chain_spec.genesis().difficulty,
         });
 
         // set the status
@@ -507,6 +564,9 @@ impl NetworkConfigBuilder {
 
         // set a fork filter based on the chain spec and head
         let fork_filter = chain_spec.fork_filter(head);
+
+        // get the chain id
+        let chain_id = chain_spec.chain().id();
 
         // If default DNS config is used then we add the known dns network to bootstrap from
         if let Some(dns_networks) =
@@ -530,7 +590,7 @@ impl NetworkConfigBuilder {
             listener_addr,
             peers_config: peers_config.unwrap_or_default(),
             sessions_config: sessions_config.unwrap_or_default(),
-            chain_spec,
+            chain_id,
             block_import: block_import.unwrap_or_else(|| Box::<ProofOfStakeBlockImport>::default()),
             network_mode,
             executor: executor.unwrap_or_else(|| Box::<TokioTaskExecutor>::default()),
@@ -540,6 +600,7 @@ impl NetworkConfigBuilder {
             fork_filter,
             tx_gossip_disabled,
             transactions_manager_config,
+            nat,
         }
     }
 }
@@ -570,9 +631,11 @@ impl NetworkMode {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use rand::thread_rng;
-    use reth_chainspec::Chain;
+    use reth_chainspec::{Chain, MAINNET};
     use reth_dns_discovery::tree::LinkEntry;
     use reth_primitives::ForkHash;
     use reth_provider::test_utils::NoopProvider;
@@ -605,7 +668,7 @@ mod tests {
         let genesis_fork_hash = ForkHash::from(chain_spec.genesis_hash());
 
         // enforce that the fork_id set in the status is consistent with the generated fork filter
-        let config = builder().chain_spec(chain_spec).build(NoopProvider::default());
+        let config = builder().build_with_noop_provider(chain_spec);
 
         let status = config.status;
         let fork_filter = config.fork_filter;

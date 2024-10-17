@@ -1,3 +1,5 @@
+use alloy_genesis::{ChainConfig, Genesis, GenesisAccount};
+use alloy_primitives::{BlockHash, BlockNumber, Uint, B256, U256};
 use candid::Principal;
 use did::certified::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
@@ -16,18 +18,18 @@ use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::RequestError,
-    headers::client::{HeadersClient, HeadersFut, HeadersRequest},
+    headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
     priority::Priority,
 };
 use reth_network_peers::PeerId;
 use reth_primitives::{
-    ruint::Uint, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainConfig, ForkCondition,
-    Genesis, GenesisAccount, Header, HeadersDirection, B256, U256,
+    BlockBody, BlockHashOrNumber, ForkCondition,
+    Header, 
 };
 use rlp::Encodable;
 use serde_json::json;
 
-use std::{self, cmp::min, collections::HashMap};
+use std::{self, cmp::min, collections::HashMap, sync::OnceLock};
 use thiserror::Error;
 
 use tracing::{debug, error, info, trace, warn};
@@ -149,12 +151,7 @@ impl BitfinityEvmClient {
                 hash_to_number.insert(block_hash, header.number);
                 bodies.insert(
                     block_hash,
-                    BlockBody {
-                        transactions: header.body,
-                        ommers: header.ommers,
-                        withdrawals: header.withdrawals,
-                        requests: header.requests,
-                    },
+                    header.body,
                 );
             }
         }
@@ -244,9 +241,14 @@ impl BitfinityEvmClient {
 
         genesis.alloc = genesis_accounts.collect();
 
+
+        let TODO_check_genesis_below = false;
+
+
         let spec = ChainSpec {
             chain,
-            genesis_hash: genesis_block.hash.map(|h| h.0.into()),
+            genesis_hash: OnceLock::new(), //genesis_block.hash.map(|h| h.0.into()).into(),
+            genesis_header: OnceLock::new(),
             genesis: genesis.clone(),
             paris_block_and_final_difficulty: Some((0, Uint::ZERO)),
             hardforks: ChainHardforks::new(vec![
@@ -270,6 +272,7 @@ impl BitfinityEvmClient {
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: 0,
             bitfinity_evm_url: Some(rpc),
+            max_gas_limit: 0,
         };
 
         tracing::info!("downloaders::bitfinity_evm_client - Bitfinity chain_spec: {:?}", spec);
@@ -353,7 +356,21 @@ impl BlockCertificateChecker {
             Certificate::from_cbor(&self.certified_data.certificate).map_err(|e| {
                 RemoteClientError::CertificateError(format!("failed to parse certificate: {e}"))
             })?;
-        certificate.verify(self.evmc_principal.as_ref(), &self.ic_root_key).map_err(|e| {
+
+        
+        let current_time_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| {
+                RemoteClientError::CertificateError(format!("failed to get current time: {e}"))
+            })?
+            .as_nanos();
+        certificate.verify(
+            self.evmc_principal.as_ref(), 
+            &self.ic_root_key, 
+            &current_time_ns, 
+            &1_000_000_000_000_000_000
+        )
+            .map_err(|e| {
             RemoteClientError::CertificateError(format!("certificate validation error: {e}"))
         })?;
 

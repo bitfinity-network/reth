@@ -1,19 +1,22 @@
 //! Helper type that represents one of two possible executor types
 
-use std::fmt::Display;
+use core::fmt::Display;
 
-use crate::execute::{
-    BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
+use crate::{
+    execute::{BatchExecutor, BlockExecutorProvider, Executor},
+    system_calls::OnStateHook,
 };
+use alloy_primitives::BlockNumber;
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
+use reth_primitives::{BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
 
 // re-export Either
 pub use futures_util::future::Either;
+use revm::State;
 
 impl<A, B> BlockExecutorProvider for Either<A, B>
 where
@@ -36,13 +39,13 @@ where
         }
     }
 
-    fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
         match self {
-            Self::Left(a) => Either::Left(a.batch_executor(db, prune_modes)),
-            Self::Right(b) => Either::Right(b.batch_executor(db, prune_modes)),
+            Self::Left(a) => Either::Left(a.batch_executor(db)),
+            Self::Right(b) => Either::Right(b.batch_executor(db)),
         }
     }
 }
@@ -71,6 +74,34 @@ where
         match self {
             Self::Left(a) => a.execute(input),
             Self::Right(b) => b.execute(input),
+        }
+    }
+
+    fn execute_with_state_closure<F>(
+        self,
+        input: Self::Input<'_>,
+        witness: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: FnMut(&State<DB>),
+    {
+        match self {
+            Self::Left(a) => a.execute_with_state_closure(input, witness),
+            Self::Right(b) => b.execute_with_state_closure(input, witness),
+        }
+    }
+
+    fn execute_with_state_hook<F>(
+        self,
+        input: Self::Input<'_>,
+        state_hook: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: OnStateHook + 'static,
+    {
+        match self {
+            Self::Left(a) => a.execute_with_state_hook(input, state_hook),
+            Self::Right(b) => b.execute_with_state_hook(input, state_hook),
         }
     }
 }
@@ -113,6 +144,13 @@ where
         match self {
             Self::Left(a) => a.set_tip(tip),
             Self::Right(b) => b.set_tip(tip),
+        }
+    }
+
+    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        match self {
+            Self::Left(a) => a.set_prune_modes(prune_modes),
+            Self::Right(b) => b.set_prune_modes(prune_modes),
         }
     }
 

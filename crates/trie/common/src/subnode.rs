@@ -1,4 +1,4 @@
-use super::{BranchNodeCompact, StoredBranchNode};
+use super::BranchNodeCompact;
 use bytes::Buf;
 use reth_codecs::Compact;
 
@@ -14,7 +14,7 @@ pub struct StoredSubNode {
 }
 
 impl Compact for StoredSubNode {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -33,10 +33,10 @@ impl Compact for StoredSubNode {
             len += 1;
         }
 
-        if let Some(node) = self.node {
+        if let Some(node) = &self.node {
             buf.put_u8(1);
             len += 1;
-            len += StoredBranchNode(node).to_compact(buf);
+            len += node.to_compact(buf);
         } else {
             len += 1;
             buf.put_u8(0);
@@ -51,16 +51,14 @@ impl Compact for StoredSubNode {
         buf.advance(key_len);
 
         let nibbles_exists = buf.get_u8() != 0;
-        let nibble = if nibbles_exists { Some(buf.get_u8()) } else { None };
+        let nibble = nibbles_exists.then(|| buf.get_u8());
 
         let node_exists = buf.get_u8() != 0;
-        let node = if node_exists {
-            let (node, rest) = StoredBranchNode::from_compact(buf, 0);
+        let node = node_exists.then(|| {
+            let (node, rest) = BranchNodeCompact::from_compact(buf, 0);
             buf = rest;
-            Some(node.0)
-        } else {
-            None
-        };
+            node
+        });
 
         (Self { key, nibble, node }, buf)
     }
@@ -87,7 +85,7 @@ mod tests {
         };
 
         let mut encoded = vec![];
-        subnode.clone().to_compact(&mut encoded);
+        subnode.to_compact(&mut encoded);
         let (decoded, _) = StoredSubNode::from_compact(&encoded[..], 0);
 
         assert_eq!(subnode, decoded);

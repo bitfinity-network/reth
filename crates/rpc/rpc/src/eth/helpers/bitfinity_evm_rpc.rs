@@ -11,7 +11,9 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> BitfinityEvmRpc for EthApi<Provider, Pool, Network, EvmConfig> 
 where Provider: ChainSpecProvider {
 
-    fn chain_spec(&self) -> Arc<reth_chainspec::ChainSpec> {
+    type ChainSpec = Provider::ChainSpec;
+
+    fn chain_spec(&self) -> Arc<Self::ChainSpec> {
         self.inner.provider().chain_spec()
     }
 
