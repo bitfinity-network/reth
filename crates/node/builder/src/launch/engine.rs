@@ -426,6 +426,7 @@ where
                 full_node.config.debug.terminate,
             ),
             node: full_node,
+            bitfinity_import: Some((ctx.provider_factory().clone(), ctx.node_config().bitfinity_import_arg.clone())),
         };
 
         Ok(handle)
