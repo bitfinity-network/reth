@@ -232,6 +232,10 @@ impl EthChainSpec for OpChainSpec {
     fn is_optimism(&self) -> bool {
         true
     }
+    
+    fn bitfinity_evm_url(&self) -> Option<&str>  {
+        self.inner.bitfinity_evm_url()
+    }
 }
 
 impl Hardforks for OpChainSpec {

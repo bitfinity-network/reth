@@ -5,14 +5,18 @@ use std::sync::Arc;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use futures::Future;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::EthChainSpec;
 use reth_rpc_server_types::result::internal_rpc_err;
 use revm_primitives::{Bytes, B256, U256};
 
 /// Proxy to the Bitfinity EVM RPC.
 pub trait BitfinityEvmRpc {
+
+    /// The chain spec type.
+    type ChainSpec: EthChainSpec + 'static;
+    
     /// Returns the ChainSpec.
-    fn chain_spec(&self) -> Arc<ChainSpec>;
+    fn chain_spec(&self) -> Arc<Self::ChainSpec>;
 
     /// Forwards `eth_gasPrice` calls to the Bitfinity EVM.
     fn gas_price(&self) -> impl Future<Output = RpcResult<U256>> + Send {
@@ -67,8 +71,8 @@ pub trait BitfinityEvmRpc {
 }
 
 /// Returns a client for the Bitfinity EVM RPC.
-fn get_client(chain_spec: &ChainSpec) -> RpcResult<(&String, EthJsonRpcClient<ReqwestClient>)> {
-    let Some(rpc_url) = &chain_spec.bitfinity_evm_url else {
+fn get_client(chain_spec: &impl EthChainSpec) -> RpcResult<(&str, EthJsonRpcClient<ReqwestClient>)> {
+    let Some(rpc_url) = chain_spec.bitfinity_evm_url() else {
         return Err(internal_rpc_err("bitfinity_evm_url not found in chain spec"));
     };
 

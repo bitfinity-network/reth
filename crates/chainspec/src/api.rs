@@ -56,6 +56,9 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn is_optimism(&self) -> bool {
         self.chain().is_optimism()
     }
+
+    /// Returns the URL for the Bitfinity EVM RPC.
+    fn bitfinity_evm_url(&self) -> Option<&str>;
 }
 
 impl EthChainSpec for ChainSpec {
@@ -105,5 +108,9 @@ impl EthChainSpec for ChainSpec {
 
     fn is_optimism(&self) -> bool {
         self.chain.is_optimism()
+    }
+    
+    fn bitfinity_evm_url(&self) -> Option<&str>  {
+        self.bitfinity_evm_url.as_deref()
     }
 }
