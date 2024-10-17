@@ -1,22 +1,25 @@
-use super::StoredHashBuilderValue;
-use crate::{StoredTrieMask, TrieMask};
-use alloy_trie::{hash_builder::HashBuilderValue, HashBuilder};
+use crate::TrieMask;
+use alloy_trie::{hash_builder::HashBuilderValue, nodes::RlpNode, HashBuilder};
 use bytes::Buf;
 use nybbles::Nibbles;
-use reth_codecs::{derive_arbitrary, Compact};
+use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
 /// The hash builder state for storing in the database.
 /// Check the `reth-trie` crate for more info on hash builder.
-#[derive_arbitrary(compact)]
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "arbitrary",
+    derive(arbitrary::Arbitrary),
+    reth_codecs::add_arbitrary_tests(compact)
+)]
 pub struct HashBuilderState {
     /// The current key.
     pub key: Vec<u8>,
-    /// The builder stack.
-    pub stack: Vec<Vec<u8>>,
     /// The current node value.
     pub value: HashBuilderValue,
+    /// The builder stack.
+    pub stack: Vec<RlpNode>,
 
     /// Group masks.
     pub groups: Vec<TrieMask>,
@@ -61,7 +64,7 @@ impl From<HashBuilder> for HashBuilderState {
 }
 
 impl Compact for HashBuilderState {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -77,24 +80,24 @@ impl Compact for HashBuilderState {
             len += 2 + item.len();
         }
 
-        len += StoredHashBuilderValue(self.value).to_compact(buf);
+        len += self.value.to_compact(buf);
 
         buf.put_u16(self.groups.len() as u16);
         len += 2;
         for item in &self.groups {
-            len += StoredTrieMask(*item).to_compact(buf);
+            len += (*item).to_compact(buf);
         }
 
         buf.put_u16(self.tree_masks.len() as u16);
         len += 2;
         for item in &self.tree_masks {
-            len += StoredTrieMask(*item).to_compact(buf);
+            len += (*item).to_compact(buf);
         }
 
         buf.put_u16(self.hash_masks.len() as u16);
         len += 2;
         for item in &self.hash_masks {
-            len += StoredTrieMask(*item).to_compact(buf);
+            len += (*item).to_compact(buf);
         }
 
         buf.put_u8(self.stored_in_database as u8);
@@ -109,16 +112,16 @@ impl Compact for HashBuilderState {
         let mut stack = Vec::with_capacity(stack_len);
         for _ in 0..stack_len {
             let item_len = buf.get_u16() as usize;
-            stack.push(Vec::from(&buf[..item_len]));
+            stack.push(RlpNode::from_raw(&buf[..item_len]).unwrap());
             buf.advance(item_len);
         }
 
-        let (StoredHashBuilderValue(value), mut buf) = StoredHashBuilderValue::from_compact(buf, 0);
+        let (value, mut buf) = HashBuilderValue::from_compact(buf, 0);
 
         let groups_len = buf.get_u16() as usize;
         let mut groups = Vec::with_capacity(groups_len);
         for _ in 0..groups_len {
-            let (StoredTrieMask(item), rest) = StoredTrieMask::from_compact(buf, 0);
+            let (item, rest) = TrieMask::from_compact(buf, 0);
             groups.push(item);
             buf = rest;
         }
@@ -126,7 +129,7 @@ impl Compact for HashBuilderState {
         let tree_masks_len = buf.get_u16() as usize;
         let mut tree_masks = Vec::with_capacity(tree_masks_len);
         for _ in 0..tree_masks_len {
-            let (StoredTrieMask(item), rest) = StoredTrieMask::from_compact(buf, 0);
+            let (item, rest) = TrieMask::from_compact(buf, 0);
             tree_masks.push(item);
             buf = rest;
         }
@@ -134,7 +137,7 @@ impl Compact for HashBuilderState {
         let hash_masks_len = buf.get_u16() as usize;
         let mut hash_masks = Vec::with_capacity(hash_masks_len);
         for _ in 0..hash_masks_len {
-            let (StoredTrieMask(item), rest) = StoredTrieMask::from_compact(buf, 0);
+            let (item, rest) = TrieMask::from_compact(buf, 0);
             hash_masks.push(item);
             buf = rest;
         }
@@ -147,24 +150,23 @@ impl Compact for HashBuilderState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
-    use proptest_arbitrary_interop::arb;
 
     #[test]
     fn hash_builder_state_regression() {
         let mut state = HashBuilderState::default();
-        state.stack.push(vec![]);
+        state.stack.push(Default::default());
         let mut buf = vec![];
         let len = state.clone().to_compact(&mut buf);
         let (decoded, _) = HashBuilderState::from_compact(&buf, len);
         assert_eq!(state, decoded);
     }
 
-    proptest! {
+    #[cfg(feature = "arbitrary")]
+    proptest::proptest! {
         #[test]
-        fn hash_builder_state_roundtrip(state in arb::<HashBuilderState>()) {
+        fn hash_builder_state_roundtrip(state in proptest_arbitrary_interop::arb::<HashBuilderState>()) {
             let mut buf = vec![];
-            let len = state.clone().to_compact(&mut buf);
+            let len = state.to_compact(&mut buf);
             let (decoded, _) = HashBuilderState::from_compact(&buf, len);
             assert_eq!(state, decoded);
         }

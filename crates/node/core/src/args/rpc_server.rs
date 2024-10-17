@@ -135,6 +135,11 @@ pub struct RpcServerArgs {
     pub rpc_max_connections: MaxU32,
 
     /// Maximum number of concurrent tracing requests.
+    ///
+    /// By default this chooses a sensible value based on the number of available cores.
+    /// Tracing requests are generally CPU bound.
+    /// Choosing a value that is higher than the available CPU cores can have a negative impact on
+    /// the performance of the node and affect the node's ability to maintain sync.
     #[arg(long = "rpc.max-tracing-requests", alias = "rpc-max-tracing-requests", value_name = "COUNT", default_value_t = constants::default_max_tracing_requests())]
     pub rpc_max_tracing_requests: usize,
 
@@ -155,6 +160,28 @@ pub struct RpcServerArgs {
         default_value_t = constants::gas_oracle::RPC_DEFAULT_GAS_CAP
     )]
     pub rpc_gas_cap: u64,
+
+    /// Maximum number of blocks for `eth_simulateV1` call.
+    #[arg(
+        long = "rpc.max-simulate-blocks",
+        value_name = "BLOCKS_COUNT",
+        default_value_t = constants::DEFAULT_MAX_SIMULATE_BLOCKS
+    )]
+    pub rpc_max_simulate_blocks: u64,
+
+    /// The maximum proof window for historical proof generation.
+    /// This value allows for generating historical proofs up to
+    /// configured number of blocks from current tip (up to `tip - window`).
+    #[arg(
+        long = "rpc.eth-proof-window",
+        default_value_t = constants::DEFAULT_ETH_PROOF_WINDOW,
+        value_parser = RangedU64ValueParser::<u64>::new().range(..=constants::MAX_ETH_PROOF_WINDOW)
+    )]
+    pub rpc_eth_proof_window: u64,
+
+    /// Maximum number of concurrent getproof requests.
+    #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = constants::DEFAULT_PROOF_PERMITS)]
+    pub rpc_proof_permits: usize,
 
     /// State cache configuration.
     #[command(flatten)]
@@ -286,8 +313,11 @@ impl Default for RpcServerArgs {
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
+            rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
+            rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
+            rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
         }
     }
 }
@@ -350,17 +380,12 @@ mod tests {
 
     #[test]
     fn test_rpc_server_eth_call_bundle_args() {
-        let args = CommandParser::<RpcServerArgs>::parse_from([
-            "reth",
-            "--http.api",
-            "eth,admin,debug,eth-call-bundle",
-        ])
-        .args;
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.api", "eth,admin,debug"])
+                .args;
 
         let apis = args.http_api.unwrap();
-        let expected =
-            RpcModuleSelection::try_from_selection(["eth", "admin", "debug", "eth-call-bundle"])
-                .unwrap();
+        let expected = RpcModuleSelection::try_from_selection(["eth", "admin", "debug"]).unwrap();
 
         assert_eq!(apis, expected);
     }

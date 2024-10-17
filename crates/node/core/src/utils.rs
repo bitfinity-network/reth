@@ -1,25 +1,23 @@
 //! Utility functions for node startup and shutdown, for example path parsing and retrieving single
 //! blocks from the network.
 
+use alloy_primitives::Sealable;
+use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
 use reth_chainspec::ChainSpec;
 use reth_consensus_common::validation::validate_block_pre_execution;
-use reth_fs_util as fs;
-use reth_network::NetworkManager;
 use reth_network_p2p::{
     bodies::client::BodiesClient,
-    headers::client::{HeadersClient, HeadersRequest},
+    headers::client::{HeadersClient, HeadersDirection, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedBlock, SealedHeader};
-use reth_provider::BlockReader;
-use reth_rpc_types::engine::{JwtError, JwtSecret};
+use reth_primitives::{BlockHashOrNumber, SealedBlock, SealedHeader};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info};
 
 /// Parses a user-specified path with support for environment variables and common shorthands (e.g.
 /// ~ for the user's home directory).
@@ -35,29 +33,6 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
     } else {
         info!(target: "reth::cli", ?path, "Creating JWT auth secret file");
         JwtSecret::try_create_random(path)
-    }
-}
-
-/// Collect the peers from the [`NetworkManager`] and write them to the given
-/// `persistent_peers_file`, if configured.
-pub fn write_peers_to_file<C>(network: &NetworkManager<C>, persistent_peers_file: Option<PathBuf>)
-where
-    C: BlockReader + Unpin,
-{
-    if let Some(file_path) = persistent_peers_file {
-        let known_peers = network.all_peers().collect::<Vec<_>>();
-        if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
-            trace!(target: "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
-            let parent_dir = file_path.parent().map(fs::create_dir_all).transpose();
-            match parent_dir.and_then(|_| fs::write(&file_path, known_peers)) {
-                Ok(_) => {
-                    info!(target: "reth::cli", peers_file=?file_path, "Wrote network peers to file");
-                }
-                Err(err) => {
-                    warn!(target: "reth::cli", %err, peers_file=?file_path, "Failed to write network peers to file");
-                }
-            }
-        }
     }
 }
 
@@ -79,7 +54,9 @@ where
         eyre::bail!("Invalid number of headers received. Expected: 1. Received: {}", response.len())
     }
 
-    let header = response.into_iter().next().unwrap().seal_slow();
+    let sealed_header = response.into_iter().next().unwrap().seal_slow();
+    let (header, seal) = sealed_header.into_parts();
+    let header = SealedHeader::new(header, seal);
 
     let valid = match id {
         BlockHashOrNumber::Hash(hash) => header.hash() == hash,
@@ -114,14 +91,8 @@ where
         eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0")
     }
 
-    let block = response.unwrap();
-    let block = SealedBlock {
-        header,
-        body: block.transactions,
-        ommers: block.ommers,
-        withdrawals: block.withdrawals,
-        requests: block.requests,
-    };
+    let body = response.unwrap();
+    let block = SealedBlock { header, body };
 
     validate_block_pre_execution(&block, &chain_spec)?;
 

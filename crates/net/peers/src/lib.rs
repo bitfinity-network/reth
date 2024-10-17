@@ -39,6 +39,11 @@
 //! - [`TrustedPeer`]: A [`NodeRecord`] with an optional domain name, which can be resolved to a
 //!   [`NodeRecord`]. Useful for adding trusted peers at startup, whose IP address may not be
 //!   static.
+//!
+//!
+//! ## Feature Flags
+//!
+//! - `net`: Support for address lookups.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -112,6 +117,7 @@ pub enum AnyNode {
 
 impl AnyNode {
     /// Returns the peer id of the node.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn peer_id(&self) -> PeerId {
         match self {
             Self::NodeRecord(record) => record.id,
@@ -122,6 +128,7 @@ impl AnyNode {
     }
 
     /// Returns the full node record if available.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
             Self::NodeRecord(record) => Some(*record),

@@ -1,8 +1,9 @@
+use alloy_primitives::B256;
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives::{Header, SealedHeader, B256};
+use reth_primitives::{Header, SealedHeader};
 use schnellru::{ByLength, LruMap};
 use std::sync::Arc;
 use tracing::warn;
@@ -23,7 +24,8 @@ pub struct InvalidHeaderCache {
 }
 
 impl InvalidHeaderCache {
-    pub(crate) fn new(max_length: u32) -> Self {
+    /// Invalid header cache constructor.
+    pub fn new(max_length: u32) -> Self {
         Self { headers: LruMap::new(ByLength::new(max_length)), metrics: Default::default() }
     }
 
@@ -66,7 +68,7 @@ impl InvalidHeaderCache {
     }
 
     /// Inserts an invalid ancestor into the map.
-    pub(crate) fn insert(&mut self, invalid_ancestor: SealedHeader) {
+    pub fn insert(&mut self, invalid_ancestor: SealedHeader) {
         if self.get(&invalid_ancestor.hash()).is_none() {
             let hash = invalid_ancestor.hash();
             let header = invalid_ancestor.unseal();
@@ -104,11 +106,14 @@ struct InvalidHeaderCacheMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::Sealable;
 
     #[test]
     fn test_hit_eviction() {
         let mut cache = InvalidHeaderCache::new(10);
-        let header = Header::default().seal_slow();
+        let sealed = Header::default().seal_slow();
+        let (header, seal) = sealed.into_parts();
+        let header = SealedHeader::new(header, seal);
         cache.insert(header.clone());
         assert_eq!(cache.headers.get(&header.hash()).unwrap().hit_count, 0);
 

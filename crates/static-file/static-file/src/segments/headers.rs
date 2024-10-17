@@ -1,10 +1,10 @@
 use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
 use reth_db::tables;
-use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    DatabaseProviderRO,
+    DBProvider,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
@@ -14,14 +14,14 @@ use std::ops::RangeInclusive;
 #[derive(Debug, Default)]
 pub struct Headers;
 
-impl<DB: Database> Segment<DB> for Headers {
+impl<Provider: DBProvider> Segment<Provider> for Headers {
     fn segment(&self) -> StaticFileSegment {
         StaticFileSegment::Headers
     }
 
     fn copy_to_static_files(
         &self,
-        provider: DatabaseProviderRO<DB>,
+        provider: Provider,
         static_file_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
@@ -50,7 +50,7 @@ impl<DB: Database> Segment<DB> for Headers {
             debug_assert_eq!(header_td_block, canonical_header_block);
 
             let _static_file_block =
-                static_file_writer.append_header(header, header_td.0, canonical_header)?;
+                static_file_writer.append_header(&header, header_td.0, &canonical_header)?;
             debug_assert_eq!(_static_file_block, header_block);
         }
 

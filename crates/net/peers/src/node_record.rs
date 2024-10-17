@@ -33,10 +33,10 @@ use enr::Enr;
 pub struct NodeRecord {
     /// The Address of a node.
     pub address: IpAddr,
-    /// TCP port of the port that accepts connections.
-    pub tcp_port: u16,
     /// UDP discovery port.
     pub udp_port: u16,
+    /// TCP port of the port that accepts connections.
+    pub tcp_port: u16,
     /// Public key of the discovery service
     pub id: PeerId,
 }
@@ -193,6 +193,15 @@ impl FromStr for NodeRecord {
             .map_err(|e| NodeRecordParseError::InvalidId(e.to_string()))?;
 
         Ok(Self { address, id, tcp_port: port, udp_port })
+    }
+}
+
+#[cfg(feature = "secp256k1")]
+impl TryFrom<Enr<secp256k1::SecretKey>> for NodeRecord {
+    type Error = NodeRecordParseError;
+
+    fn try_from(enr: Enr<secp256k1::SecretKey>) -> Result<Self, Self::Error> {
+        (&enr).try_into()
     }
 }
 
