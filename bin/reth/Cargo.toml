@@ -117,6 +117,7 @@ hex = { workspace = true }
 jsonrpsee = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
+reth-db = { workspace = true, features = ["test-utils"] }
 reth-db-common = { workspace = true }
 reth-ethereum-engine-primitives = { workspace = true }
 reth-primitives = { workspace = true, features = ["test-utils"] }
