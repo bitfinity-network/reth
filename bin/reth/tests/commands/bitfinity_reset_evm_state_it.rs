@@ -17,9 +17,11 @@ use reth::{
     },
 };
 use reth_db::DatabaseEnv;
+use reth_node_api::NodeTypesWithDBAdapter;
+use reth_node_ethereum::EthereumNode;
 use reth_provider::{AccountReader, BlockNumReader, BlockReader, ProviderFactory};
 use reth_trie::test_utils::state_root;
-use revm_primitives::{keccak256, B256};
+use revm_primitives::{keccak256, B256, U256};
 use serial_test::serial;
 use tracing::*;
 
@@ -187,11 +189,11 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
                         balance: raw_account.balance.into(),
                         bytecode_hash: raw_account.bytecode.map(|code| keccak256(&code.0)),
                     };
-                    let storage: Vec<(B256, reth_primitives::U256)> = raw_account
+                    let storage: Vec<(B256, U256)> = raw_account
                         .storage
                         .into_iter()
                         .map(|(k, v)| {
-                            let k: reth_primitives::U256 = k.into();
+                            let k: U256 = k.into();
                             (k.into(), v.into())
                         })
                         .collect();
@@ -205,7 +207,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
 
 async fn build_bitfinity_reset_evm_command(
     identity_name: &str,
-    provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+    provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
     dfx_port: u16,
     evm_datasource_url: &str,
 ) -> (EvmCanisterClient<IcAgentClient>, BitfinityResetEvmStateCommand) {

@@ -113,9 +113,12 @@ tempfile.workspace = true
 
 # bitfinity dev dependencies
 dirs.workspace = true
+hex = { workspace = true }
 jsonrpsee = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
+reth-db-common = { workspace = true }
+reth-ethereum-engine-primitives = { workspace = true }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 revm-primitives.workspace = true

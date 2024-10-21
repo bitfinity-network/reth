@@ -9,7 +9,6 @@ use reth_config::{config::EtlConfig, Config};
 use reth_db::DatabaseEnv;
 
 use reth_consensus::Consensus;
-use reth_db::database::Database;
 use reth_downloaders::{
     bitfinity_evm_client::{BitfinityEvmClient, CertificateCheckSettings},
     bodies::bodies::BodiesDownloaderBuilder,

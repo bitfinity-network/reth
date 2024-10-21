@@ -67,8 +67,9 @@ fn main() {
             }
 
             let use_legacy_engine = engine_args.legacy;
-            let handle = match use_legacy_engine {
+            match use_legacy_engine {
                 false => {
+                    panic!("Bitfinity node can only use the legacy engine");
                     let engine_tree_config = TreeConfig::default()
                         .with_persistence_threshold(engine_args.persistence_threshold)
                         .with_memory_block_buffer_target(engine_args.memory_block_buffer_target);
@@ -85,38 +86,36 @@ fn main() {
                             builder.launch_with(launcher)
                         })
                         .await?;
-                    //handle.node_exit_future.await
-                    handle
+                    handle.node_exit_future.await
                 }
                 true => {
                     info!(target: "reth::cli", "Running with legacy engine");
                     let handle = builder.launch_node(EthereumNode::default()).await?;
-                    //handle.node_exit_future.await
-                    handle
+
+                    let blockchain_provider = handle.node.provider.clone();
+                    let config = handle.node.config.config.clone();
+                    let chain = handle.node.chain_spec();
+                    let datadir = handle.node.data_dir.clone();
+                    let (provider_factory, bitfinity) =
+                        handle.bitfinity_import.clone().expect("Bitfinity import not configured");
+        
+                    // Init bitfinity import
+                    {
+                        let import = reth::commands::bitfinity_import::BitfinityImportCommand::new(
+                            config,
+                            datadir,
+                            chain,
+                            bitfinity,
+                            provider_factory,
+                            blockchain_provider,
+                        );
+                        let _import_handle = import.schedule_execution().await?;
+                    }
+        
+                    handle.node_exit_future.await
                 }
             }
 
-            let blockchain_provider = handle.node.provider.clone();
-	        let config = handle.node.config.config.clone();
-	        let chain = handle.node.chain_spec();
-	        let datadir = handle.node.data_dir.clone();
-	        let (provider_factory, bitfinity) =
-	            handle.bitfinity_import.clone().expect("Bitfinity import not configured");
-
-	        // Init bitfinity import
-	        {
-	            let import = BitfinityImportCommand::new(
-	                config,
-	                datadir,
-	                chain,
-	                bitfinity,
-	                provider_factory,
-	                blockchain_provider,
-	            );
-	            let _import_handle = import.schedule_execution().await?;
-	        }
-
-	        handle.node_exit_future.await
             
         })
     {

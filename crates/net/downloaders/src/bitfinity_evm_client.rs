@@ -241,10 +241,6 @@ impl BitfinityEvmClient {
 
         genesis.alloc = genesis_accounts.collect();
 
-
-        let TODO_check_genesis_below = false;
-
-
         let spec = ChainSpec {
             chain,
             genesis_hash: OnceLock::new(), //genesis_block.hash.map(|h| h.0.into()).into(),

@@ -13,10 +13,16 @@ use jsonrpsee::{
 use rand::RngCore;
 use reth::{args::{DatadirArgs, RpcServerArgs}, dirs::{DataDirPath, MaybePlatformPath}};
 use reth_consensus::Consensus;
-use reth_db::{init_db, test_utils::tempdir_path};
-use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
-use reth_node_ethereum::EthereumNode;
+use reth_db::{init_db, test_utils::tempdir_path, DatabaseEnv};
+use reth_ethereum_engine_primitives::EthereumEngineValidator;
+use reth_network::NetworkHandle;
+use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
+use reth_node_builder::{components::Components, rpc::RpcAddOns, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
+use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
+use reth_provider::providers::BlockchainProvider;
+use reth_rpc::EthApi;
 use reth_tasks::TaskManager;
+use reth_transaction_pool::{blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool, TransactionValidationTaskExecutor};
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 
 
@@ -83,7 +89,7 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     let mut tx = [0u8; 256];
     rand::thread_rng().fill_bytes(&mut tx);
     let expected_tx_hash =
-        keccak::keccak_hash(format!("0x{}", reth_primitives::hex::encode(tx)).as_bytes());
+        keccak::keccak_hash(format!("0x{}", hex::encode(tx)).as_bytes());
 
     // Act
     let result = reth_client.send_raw_transaction_bytes(&tx).await;
@@ -97,7 +103,7 @@ async fn start_reth_node(
     bitfinity_evm_url: Option<String>,
     import_data: Option<ImportData>) -> (
     EthJsonRpcClient<ReqwestClient>,
-    NodeHandle<reth_node_builder::NodeAdapter<reth_node_api::FullNodeTypesAdapter<EthereumNode, Arc<reth_db::DatabaseEnv>, reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>>, reth_node_builder::components::Components<reth_node_api::FullNodeTypesAdapter<EthereumNode, Arc<reth_db::DatabaseEnv>, reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>>, reth_transaction_pool::Pool<reth_transaction_pool::TransactionValidationTaskExecutor<reth_transaction_pool::EthTransactionValidator<reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>, reth_transaction_pool::EthPooledTransaction>>, reth_transaction_pool::CoinbaseTipOrdering<reth_transaction_pool::EthPooledTransaction>, reth_transaction_pool::blobstore::DiskFileBlobStore>, reth_node_ethereum::EthEvmConfig, reth_node_ethereum::EthExecutorProvider, Arc<dyn Consensus>>>>,
+    NodeHandle<NodeAdapter<FullNodeTypesAdapter<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>, Components<FullNodeTypesAdapter<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>, Pool<TransactionValidationTaskExecutor<EthTransactionValidator<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, EthPooledTransaction>>, CoinbaseTipOrdering<EthPooledTransaction>, DiskFileBlobStore>, EthEvmConfig, EthExecutorProvider<EthEvmConfig>, Arc<dyn Consensus>, EthereumEngineValidator>>, RpcAddOns<NodeAdapter<FullNodeTypesAdapter<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>, Components<FullNodeTypesAdapter<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>, Pool<TransactionValidationTaskExecutor<EthTransactionValidator<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, EthPooledTransaction>>, CoinbaseTipOrdering<EthPooledTransaction>, DiskFileBlobStore>, EthEvmConfig, EthExecutorProvider<EthEvmConfig>, Arc<dyn Consensus>, EthereumEngineValidator>>, EthApi<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, Pool<TransactionValidationTaskExecutor<EthTransactionValidator<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, EthPooledTransaction>>, CoinbaseTipOrdering<EthPooledTransaction>, DiskFileBlobStore>, NetworkHandle, EthEvmConfig>>>,
     ) {
 
         let tasks = TaskManager::current();

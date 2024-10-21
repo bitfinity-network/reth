@@ -4,6 +4,7 @@
 //!
 
 use super::utils::*;
+use alloy_eips::BlockNumberOrTag;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use reth_provider::{BlockNumReader, BlockReader, BlockReaderIdExt};
 use std::time::Duration;
@@ -88,10 +89,10 @@ async fn bitfinity_test_finalized_and_safe_query_params_works() {
     // Act
     import_blocks(import_data.clone(), Duration::from_secs(20), true).await;
 
-    let latest_block = import_data.blockchain_db.block_by_number_or_tag(reth_rpc_types::BlockNumberOrTag::Finalized).unwrap().unwrap();
+    let latest_block = import_data.blockchain_db.block_by_number_or_tag(BlockNumberOrTag::Finalized).unwrap().unwrap();
     assert_eq!(end_block, latest_block.number);
 
-    let safe_block = import_data.blockchain_db.block_by_number_or_tag(reth_rpc_types::BlockNumberOrTag::Safe).unwrap().unwrap();
+    let safe_block = import_data.blockchain_db.block_by_number_or_tag(BlockNumberOrTag::Safe).unwrap().unwrap();
     assert_eq!(end_block, safe_block.number);
 
 }
