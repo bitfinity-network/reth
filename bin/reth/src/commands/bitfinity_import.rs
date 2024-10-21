@@ -18,7 +18,7 @@ use reth_downloaders::{
 use reth_exex::ExExManagerHandle;
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
-use reth_node_ethereum::EthereumNode;
+use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
 use reth_provider::providers::BlockchainProvider;
 use reth_provider::{
@@ -83,7 +83,7 @@ impl BitfinityImportCommand {
         let config_path = config.unwrap_or_else(|| datadir.config());
 
         info!(target: "reth::cli - BitfinityImportCommand", path = ?config_path, "Configuration loaded");
-        let mut config: Config = confy::load_path(config_path)
+        let mut config = Config::from_path(config_path)
             .expect("Failed to load BitfinityImportCommand configuration");
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
@@ -222,10 +222,10 @@ impl BitfinityImportCommand {
             .into_task();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let executor = block_executor!(provider_factory.chain_spec());
-
+        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
+        
         let max_block = remote_client.max_block().unwrap_or(0);
-        let pipeline = Pipeline::builder()
+        let pipeline = Pipeline::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::builder()
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty
             .with_max_block(max_block)
