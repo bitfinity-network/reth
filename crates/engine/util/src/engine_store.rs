@@ -1,13 +1,10 @@
 //! Stores engine API messages to disk for later inspection and replay.
 
+use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayload, ForkchoiceState};
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_engine_primitives::EngineTypes;
 use reth_fs_util as fs;
-use reth_rpc_types::{
-    engine::{CancunPayloadFields, ForkchoiceState},
-    ExecutionPayload,
-};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -134,10 +131,10 @@ impl<S> EngineStoreStream<S> {
     }
 }
 
-impl<Engine, S> Stream for EngineStoreStream<S>
+impl<S, Engine> Stream for EngineStoreStream<S>
 where
-    Engine: EngineTypes,
     S: Stream<Item = BeaconEngineMessage<Engine>>,
+    Engine: EngineTypes,
 {
     type Item = S::Item;
 
@@ -146,7 +143,7 @@ where
         let next = ready!(this.stream.poll_next_unpin(cx));
         if let Some(msg) = &next {
             if let Err(error) = this.store.on_message(msg, SystemTime::now()) {
-                error!(target: "engine::intercept", ?msg, %error, "Error handling Engine API message");
+                error!(target: "engine::stream::store", ?msg, %error, "Error handling Engine API message");
             }
         }
         Poll::Ready(next)

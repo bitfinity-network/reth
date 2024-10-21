@@ -22,7 +22,6 @@ mod ganache;
 mod hardhat;
 mod mev;
 mod net;
-mod optimism;
 mod otterscan;
 mod reth;
 mod rpc;
@@ -40,7 +39,7 @@ pub mod servers {
         admin::AdminApiServer,
         debug::DebugApiServer,
         engine::{EngineApiServer, EngineEthApiServer},
-        mev::MevApiServer,
+        mev::{MevFullApiServer, MevSimApiServer},
         net::NetApiServer,
         otterscan::OtterscanServer,
         reth::RethApiServer,
@@ -70,9 +69,10 @@ pub mod clients {
         engine::{EngineApiClient, EngineEthApiClient},
         ganache::GanacheApiClient,
         hardhat::HardhatApiClient,
-        mev::MevApiClient,
+        mev::{MevFullApiClient, MevSimApiClient},
         net::NetApiClient,
         otterscan::OtterscanClient,
+        reth::RethApiClient,
         rpc::RpcApiServer,
         trace::TraceApiClient,
         txpool::TxPoolApiClient,

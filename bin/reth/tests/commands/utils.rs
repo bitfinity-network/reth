@@ -23,6 +23,8 @@ use reth_errors::BlockExecutionError;
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
+use reth_node_api::NodeTypesWithDBAdapter;
+use reth_node_ethereum::EthereumNode;
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
@@ -57,8 +59,8 @@ pub struct ImportData {
     pub chain: Arc<ChainSpec>,
     pub data_dir: ChainPath<DataDirPath>,
     pub database: Arc<DatabaseEnv>,
-    pub provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
-    pub blockchain_db: BlockchainProvider<Arc<DatabaseEnv>>,
+    pub provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+    pub blockchain_db: BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
     pub bitfinity_args: BitfinityImportArgs,
 }
 

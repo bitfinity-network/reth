@@ -1,5 +1,5 @@
-use crate::{nodes::CHILD_INDEX_RANGE, BranchNodeCompact, Nibbles, StoredSubNode};
-use reth_primitives::B256;
+use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
+use alloy_primitives::B256;
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]
@@ -49,7 +49,7 @@ impl From<StoredSubNode> for CursorSubNode {
 
 impl From<CursorSubNode> for StoredSubNode {
     fn from(value: CursorSubNode) -> Self {
-        let nibble = if value.nibble >= 0 { Some(value.nibble as u8) } else { None };
+        let nibble = (value.nibble >= 0).then_some(value.nibble as u8);
         Self { key: value.key.to_vec(), nibble, node: value.node }
     }
 }

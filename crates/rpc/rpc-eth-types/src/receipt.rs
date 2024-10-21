@@ -1,10 +1,12 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
-use reth_primitives::{Address, Receipt, TransactionMeta, TransactionSigned, TxKind};
-use reth_rpc_types::{
-    AnyReceiptEnvelope, AnyTransactionReceipt, Log, OtherFields, ReceiptWithBloom,
-    TransactionReceipt, WithOtherFields,
+use alloy_consensus::Transaction;
+use alloy_primitives::{Address, TxKind};
+use alloy_rpc_types::{
+    AnyReceiptEnvelope, AnyTransactionReceipt, Log, ReceiptWithBloom, TransactionReceipt,
 };
+use alloy_serde::{OtherFields, WithOtherFields};
+use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use revm_primitives::calc_blob_gasprice;
 
 use super::{EthApiError, EthResult};
@@ -13,9 +15,9 @@ use super::{EthApiError, EthResult};
 #[derive(Debug)]
 pub struct ReceiptBuilder {
     /// The base response body, contains L1 fields.
-    base: TransactionReceipt<AnyReceiptEnvelope<Log>>,
+    pub base: TransactionReceipt<AnyReceiptEnvelope<Log>>,
     /// Additional L2 fields.
-    other: OtherFields,
+    pub other: OtherFields,
 }
 
 impl ReceiptBuilder {
@@ -58,9 +60,11 @@ impl ReceiptBuilder {
             num_logs += prev_receipt.logs.len();
         }
 
-        let mut logs = Vec::with_capacity(receipt.logs.len());
-        for (tx_log_idx, log) in receipt.logs.iter().enumerate() {
-            let rpclog = Log {
+        let logs: Vec<Log> = receipt
+            .logs
+            .iter()
+            .enumerate()
+            .map(|(tx_log_idx, log)| Log {
                 inner: log.clone(),
                 block_hash: Some(meta.block_hash),
                 block_number: Some(meta.block_number),
@@ -69,11 +73,10 @@ impl ReceiptBuilder {
                 transaction_index: Some(meta.index),
                 log_index: Some((num_logs + tx_log_idx) as u64),
                 removed: false,
-            };
-            logs.push(rpclog);
-        }
+            })
+            .collect();
 
-        let rpc_receipt = reth_rpc_types::Receipt {
+        let rpc_receipt = alloy_rpc_types::Receipt {
             status: receipt.success.into(),
             cumulative_gas_used: receipt.cumulative_gas_used as u128,
             logs,
@@ -104,6 +107,7 @@ impl ReceiptBuilder {
             // EIP-4844 fields
             blob_gas_price,
             blob_gas_used: blob_gas_used.map(u128::from),
+            authorization_list: transaction.authorization_list().map(|l| l.to_vec()),
         };
 
         Ok(Self { base, other: Default::default() })
@@ -118,9 +122,6 @@ impl ReceiptBuilder {
     /// Builds a receipt response from the base response body, and any set additional fields.
     pub fn build(self) -> AnyTransactionReceipt {
         let Self { base, other } = self;
-        let mut res = WithOtherFields::new(base);
-        res.other = other;
-
-        res
+        WithOtherFields { inner: base, other }
     }
 }

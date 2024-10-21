@@ -15,11 +15,14 @@ use reth_db::cursor::DbCursorRO;
 use reth_db::transaction::DbTx;
 use reth_db::{init_db, tables, DatabaseEnv};
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
+use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_core::args::{BitfinityResetEvmStateArgs, DatadirArgs};
 use reth_node_core::dirs::{DataDirPath, MaybePlatformPath};
+use reth_node_ethereum::EthereumNode;
 use reth_primitives::StorageEntry;
 use reth_provider::providers::StaticFileProvider;
 use reth_provider::{BlockNumReader, BlockReader, ProviderFactory};
+use reth_primitives::revm_primitives::U256;
 use tracing::{debug, info, trace, warn};
 
 /// Builder for the `bitfinity reset evm state` command
@@ -82,7 +85,7 @@ impl BitfinityResetEvmStateCommandBuilder {
 /// Command that initializes the reset of remote EVM node using the current node state
 #[derive(Debug)]
 pub struct BitfinityResetEvmStateCommand {
-    provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+    provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
     executor: Arc<dyn ResetStateExecutor>,
     parallel_requests: usize,
 }
@@ -90,7 +93,7 @@ pub struct BitfinityResetEvmStateCommand {
 impl BitfinityResetEvmStateCommand {
     /// Create a new instance of the command
     pub fn new(
-        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
         executor: Arc<dyn ResetStateExecutor>,
         parallel_requests: usize,
     ) -> Self {
@@ -183,7 +186,7 @@ impl BitfinityResetEvmStateCommand {
                     }
                     let StorageEntry { key, value } = storage_entry;
 
-                    let key: reth_primitives::U256 = key.into();
+                    let key: U256 = key.into();
                     storage.insert(key.into(), value.into());
                 }
 

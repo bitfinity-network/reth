@@ -1,10 +1,10 @@
 use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
 use reth_db::tables;
-use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockReader, DatabaseProviderRO,
+    BlockReader, DBProvider,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
@@ -14,7 +14,7 @@ use std::ops::RangeInclusive;
 #[derive(Debug, Default)]
 pub struct Transactions;
 
-impl<DB: Database> Segment<DB> for Transactions {
+impl<Provider: DBProvider + BlockReader> Segment<Provider> for Transactions {
     fn segment(&self) -> StaticFileSegment {
         StaticFileSegment::Transactions
     }
@@ -23,7 +23,7 @@ impl<DB: Database> Segment<DB> for Transactions {
     /// [`StaticFileSegment::Transactions`] for the provided block range.
     fn copy_to_static_files(
         &self,
-        provider: DatabaseProviderRO<DB>,
+        provider: Provider,
         static_file_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
@@ -31,8 +31,7 @@ impl<DB: Database> Segment<DB> for Transactions {
             .get_writer(*block_range.start(), StaticFileSegment::Transactions)?;
 
         for block in block_range {
-            let _static_file_block =
-                static_file_writer.increment_block(StaticFileSegment::Transactions, block)?;
+            let _static_file_block = static_file_writer.increment_block(block)?;
             debug_assert_eq!(_static_file_block, block);
 
             let block_body_indices = provider
@@ -47,7 +46,7 @@ impl<DB: Database> Segment<DB> for Transactions {
             for entry in transactions_walker {
                 let (tx_number, transaction) = entry?;
 
-                static_file_writer.append_transaction(tx_number, transaction)?;
+                static_file_writer.append_transaction(tx_number, &transaction)?;
             }
         }
 

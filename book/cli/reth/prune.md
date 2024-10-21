@@ -4,6 +4,8 @@ Prune according to the configuration without any limits
 
 ```bash
 $ reth prune --help
+```
+```txt
 Usage: reth prune [OPTIONS]
 
 Options:
@@ -33,7 +35,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>
@@ -44,7 +46,7 @@ Datadir:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
+              mainnet, sepolia, holesky, dev
 
           [default: mainnet]
 
