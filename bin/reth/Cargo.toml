@@ -102,6 +102,7 @@ candid.workspace = true
 did.workspace = true
 ethereum-json-rpc-client = { workspace = true, features = ["reqwest"] }
 evm-canister-client = { workspace = true, features = ["ic-agent-client"] }
+itertools = { workspace = true }
 lightspeed_scheduler = { workspace = true, features = ["tracing"] }
 rlp = { workspace = true }
 serial_test.workspace = true

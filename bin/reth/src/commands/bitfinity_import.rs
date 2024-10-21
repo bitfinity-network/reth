@@ -1,6 +1,6 @@
 //! Command that initializes the node by importing a chain from a remote EVM node.
 
-use crate::{dirs::DataDirPath, macros::block_executor, version::SHORT_VERSION};
+use crate::{dirs::DataDirPath, version::SHORT_VERSION};
 use futures::{Stream, StreamExt};
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -16,9 +16,10 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
+use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
+use reth_node_ethereum::EthereumNode;
 use reth_node_events::node::NodeEvent;
-use reth_primitives::B256;
 use reth_provider::providers::BlockchainProvider;
 use reth_provider::{
     BlockNumReader, CanonChainTracker, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider,
@@ -31,6 +32,7 @@ use reth_stages::{
     ExecutionStageThresholds, Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
+use reth_primitives::{revm_primitives::B256, SealedHeader};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::watch;
 use tracing::{debug, info};
@@ -50,9 +52,9 @@ pub struct BitfinityImportCommand {
     /// Bitfinity Related Args
     bitfinity: BitfinityImportArgs,
 
-    provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+    provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
 
-    blockchain_provider: BlockchainProvider<Arc<DatabaseEnv>>,
+    blockchain_provider: BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
 }
 
 /// Manually implement `Debug` for `ImportCommand` because `BlockchainProvider` doesn't implement it.
@@ -74,8 +76,8 @@ impl BitfinityImportCommand {
         datadir: ChainPath<DataDirPath>,
         chain: Arc<ChainSpec>,
         bitfinity: BitfinityImportArgs,
-        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
-        blockchain_provider: BlockchainProvider<Arc<DatabaseEnv>>,
+        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+        blockchain_provider: BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
     ) -> Self {
         // add network name to data dir
         let config_path = config.unwrap_or_else(|| datadir.config());
@@ -185,6 +187,8 @@ impl BitfinityImportCommand {
         match provider.header_by_number(chain_info.best_number)? {
             Some(header) => {
                 let sealed_header = header.seal(chain_info.best_hash);
+                let hash = sealed_header.seal();
+                let sealed_header = SealedHeader::new(sealed_header.into_inner(), hash);
                 self.blockchain_provider.set_canonical_head(sealed_header.clone());
                 self.blockchain_provider.set_finalized(sealed_header.clone());
                 self.blockchain_provider.set_safe(sealed_header);
@@ -194,16 +198,15 @@ impl BitfinityImportCommand {
         }
     }
 
-    fn build_import_pipeline<DB, C>(
+    fn build_import_pipeline<C>(
         &self,
         config: &Config,
-        provider_factory: ProviderFactory<DB>,
+        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
         consensus: &Arc<C>,
         remote_client: Arc<BitfinityEvmClient>,
-        static_file_producer: StaticFileProducer<DB>,
-    ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
+        static_file_producer: StaticFileProducer<ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>,
+    ) -> eyre::Result<(Pipeline<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, impl Stream<Item = NodeEvent>)>
     where
-        DB: Database + Clone + Unpin + 'static,
         C: Consensus + 'static,
     {
         if !remote_client.has_canonical_blocks() {
