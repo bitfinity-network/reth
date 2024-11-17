@@ -12,6 +12,7 @@ use reth_chainspec::{
 };
 
 use alloy_rlp::Decodable;
+use parking_lot::{Mutex, RwLock};
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
@@ -26,26 +27,40 @@ use reth_primitives::{
 };
 use rlp::Encodable;
 use serde_json::json;
+use std::fmt::Debug;
+use std::future::Future;
 
-use std::{self, cmp::min, collections::HashMap};
+use std::{self, cmp::min, collections::HashMap, time::Duration};
 use thiserror::Error;
-
 use tracing::{debug, error, info, trace, warn};
-
 /// Front-end API for fetching chain data from remote sources.
 ///
 /// Blocks are assumed to have populated transactions, so reading headers will also buffer
 /// transactions in memory for use in the bodies stage.
-#[derive(Debug)]
 pub struct BitfinityEvmClient {
+    /// The RPC client configuration
+    rpc_config: RpcClientConfig,
+    /// The current active client
+    client: RwLock<EthJsonRpcClient<ReqwestClient>>,
+    /// Currently using backup URL
+    using_backup: Mutex<bool>,
     /// The buffered headers retrieved when fetching new bodies.
     headers: HashMap<BlockNumber, Header>,
-
     /// A mapping between block hash and number.
     hash_to_number: HashMap<BlockHash, BlockNumber>,
-
     /// The buffered bodies retrieved when fetching new headers.
     bodies: HashMap<BlockHash, BlockBody>,
+}
+
+impl Debug for BitfinityEvmClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BitfinityEvmClient")
+            .field("rpc_config", &self.rpc_config)
+            .field("headers", &self.headers)
+            .field("hash_to_number", &self.hash_to_number)
+            .field("bodies", &self.bodies)
+            .finish()
+    }
 }
 
 /// An error that can occur when constructing and using a [`RemoteClient`].
@@ -62,6 +77,10 @@ pub enum RemoteClientError {
     /// Certificate check error
     #[error("certification check error: {0}")]
     CertificateError(String),
+
+    /// Internal error
+    #[error("internal error: {0}")]
+    InternalError(String),
 }
 
 /// Setting for checking last certified block
@@ -73,10 +92,179 @@ pub struct CertificateCheckSettings {
     pub ic_root_key: String,
 }
 
+/// RPC client configuration
+#[derive(Debug, Clone)]
+pub struct RpcClientConfig {
+    /// Primary RPC URL
+    pub primary_url: String,
+    /// Backup RPC URL
+    pub backup_url: Option<String>,
+    /// Maximum number of retries
+    pub max_retries: u32,
+    /// Delay between retries
+    pub retry_delay: Duration,
+}
+
 impl BitfinityEvmClient {
+    /// Creates a new RPC client for the given URL
+    fn create_client(url: &str) -> EthJsonRpcClient<ReqwestClient> {
+        EthJsonRpcClient::new(ReqwestClient::new(url.to_string()))
+    }
+
+    /// Create a new `BitfinityEvmClient` from RPC configuration
+    pub fn new(config: RpcClientConfig) -> Self {
+        let client = Self::create_client(&config.primary_url);
+
+        Self {
+            rpc_config: config,
+            client: RwLock::new(client),
+            using_backup: Mutex::new(false),
+            headers: HashMap::new(),
+            hash_to_number: HashMap::new(),
+            bodies: HashMap::new(),
+        }
+    }
+
+    /// Try to switch back to primary URL if we're using backup
+    async fn try_primary_url(&self) -> Result<(), RemoteClientError> {
+        // Early return if not using backup
+        {
+            let backup_status = self.using_backup.lock();
+            if !*backup_status {
+                return Ok(());
+            }
+        }
+        debug!(target: "downloaders::bitfinity_evm_client", "Attempting to switch back to primary URL");
+
+        // Create new client and test connection
+        let new_client = Self::create_client(&self.rpc_config.primary_url);
+        match new_client.get_block_number().await {
+            Ok(_) => {
+                // Update client and status atomically
+                let mut client = self.client.try_write().ok_or_else(|| {
+                    RemoteClientError::InternalError("Failed to acquire `client` lock".to_string())
+                })?;
+
+                let mut using_backup = self.using_backup.try_lock().ok_or_else(|| {
+                    RemoteClientError::InternalError(
+                        "Failed to acquire `using_backup` lock".to_string(),
+                    )
+                })?;
+
+                *client = new_client;
+                *using_backup = false;
+                info!(target: "downloaders::bitfinity_evm_client", "Successfully switched back to primary URL");
+                Ok(())
+            }
+            Err(e) => {
+                warn!(target: "downloaders::bitfinity_evm_client", "Failed to switch back to primary URL: {}, Primary URL still unavailable", e);
+
+                Ok(())
+            }
+        }
+    }
+
+    /// Switch to backup URL if available/// Switch to backup URL if available
+    async fn switch_to_backup(&self) -> Result<(), RemoteClientError> {
+        let backup_url = self.rpc_config.backup_url.as_ref().ok_or_else(|| {
+            RemoteClientError::ProviderError("No backup URL configured".to_string())
+        })?;
+
+        // Early return if already using backup
+        {
+            let using_backup = self.using_backup.lock();
+
+            if *using_backup {
+                return Err(RemoteClientError::ProviderError(
+                    "Already using backup URL".to_string(),
+                ));
+            }
+        }
+        warn!(target: "downloaders::bitfinity_evm_client", "Switching to backup RPC URL");
+
+        // Create and test backup client
+        let backup_client = Self::create_client(backup_url);
+        match backup_client.get_block_number().await {
+            Ok(_) => {
+                // Update client and status atomically
+                let mut client = self.client.write();
+
+                let mut using_backup = self.using_backup.lock();
+
+                *client = backup_client;
+                *using_backup = true;
+                info!(target: "downloaders::bitfinity_evm_client", "Successfully switched to backup URL");
+                Ok(())
+            }
+            Err(e) => {
+                error!(target: "downloaders::bitfinity_evm_client", "Failed to switch to backup URL: {}", e);
+                Err(RemoteClientError::ProviderError(format!("Backup URL check failed: {}", e)))
+            }
+        }
+    }
+
+    /// Execute an RPC call with retries and backup URL support
+    async fn execute_with_retry<F, R, T, E>(&self, operation: F) -> Result<T, RemoteClientError>
+    where
+        F: Fn(&EthJsonRpcClient<ReqwestClient>) -> R + Send + Sync,
+        R: Future<Output = Result<T, E>> + Send,
+        T: Send,
+        E: std::fmt::Display, // This workaround is necessary because anyhow::Error does not implement the `std::error::Error`trait
+    {
+        let mut retries = 0;
+        let max_retries = self.rpc_config.max_retries;
+        let delay = self.rpc_config.retry_delay;
+
+        loop {
+            let result = {
+                let client = self.client.try_read().ok_or_else(|| {
+                    RemoteClientError::InternalError("Failed to acquire `client` lock".to_string())
+                })?;
+
+                operation(&client)
+            };
+
+            match result.await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    if retries >= max_retries {
+                        // Try backup if primary failed
+                        if !*self.using_backup.lock() {
+                            match self.switch_to_backup().await {
+                                Ok(()) => {
+                                    retries = 0;
+                                    continue;
+                                }
+                                Err(backup_err) => {
+                                    return Err(RemoteClientError::ProviderError(format!(
+                                        "Primary failed after {} retries: {}. Backup failed: {}",
+                                        max_retries, e, backup_err
+                                    )));
+                                }
+                            }
+                        }
+                        return Err(RemoteClientError::ProviderError(format!(
+                            "Operation failed after {} retries: {}",
+                            retries, e
+                        )));
+                    }
+
+                    warn!(
+                        target: "downloaders::bitfinity_evm_client",
+                        "RPC call failed (attempt {}/{}), retrying in {:?}: {}",
+                        retries + 1, max_retries, delay, e
+                    );
+
+                    tokio::time::sleep(delay).await;
+                    retries += 1;
+                }
+            }
+        }
+    }
+
     /// `BitfinityEvmClient` from rpc url
     pub async fn from_rpc_url(
-        rpc: &str,
+        config: RpcClientConfig,
         start_block: u64,
         end_block: Option<u64>,
         batch_size: usize,
@@ -87,21 +275,33 @@ impl BitfinityEvmClient {
         let mut hash_to_number = HashMap::new();
         let mut bodies = HashMap::new();
 
-        let reqwest_client = ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc.to_string());
-        let provider = ethereum_json_rpc_client::EthJsonRpcClient::new(reqwest_client);
+        let client = Self::new(config.clone());
 
         let block_checker = match certificate_settings {
             None => None,
-            Some(settings) => Some(BlockCertificateChecker::new(&provider, settings).await?),
+            Some(settings) => Some(BlockCertificateChecker::new(&client, settings).await?),
         };
 
-        let latest_remote_block = provider
-            .get_block_number()
-            .await
-            .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
+        let latest_remote_block = client
+            .execute_with_retry(|client| {
+                let client = client.clone();
+                async move { client.get_block_number().await }
+            })
+            .await?;
 
         let mut end_block =
             min(end_block.unwrap_or(latest_remote_block), start_block + max_blocks - 1);
+
+        if end_block < start_block {
+            return Ok(Self {
+                rpc_config: config,
+                client: client.client,
+                using_backup: client.using_backup,
+                headers,
+                hash_to_number,
+                bodies,
+            });
+        }
 
         if let Some(block_checker) = &block_checker {
             end_block = min(end_block, block_checker.get_block_number());
@@ -113,12 +313,19 @@ impl BitfinityEvmClient {
             let count = std::cmp::min(batch_size as u64, end_block + 1 - begin_block);
             let last_block = begin_block + count - 1;
 
+            // Try switching back to primary URL if we're using backup
+            client.try_primary_url().await?;
+
             debug!(target: "downloaders::bitfinity_evm_client", "Fetching blocks from {} to {}", begin_block, last_block);
 
-            let blocks_to_fetch = (begin_block..=last_block).map(Into::into).collect::<Vec<_>>();
+            let full_blocks = client
+                .execute_with_retry(|client|{
+                    let client = client.clone();
+                    let blocks_to_fetch = (begin_block..=last_block).map(Into::into);
 
-            let full_blocks = provider
-                .get_full_blocks_by_number(blocks_to_fetch, batch_size)
+                    async move { client.get_full_blocks_by_number(blocks_to_fetch, batch_size)
+                    .await
+                }})
                 .await
                 .map_err(|e| {
                     error!(target: "downloaders::bitfinity_evm_client", begin_block, "Error fetching block: {:?}", e);
@@ -138,6 +345,7 @@ impl BitfinityEvmClient {
                 if let Some(block_checker) = &block_checker {
                     block_checker.check_block(&block)?;
                 }
+
                 let header =
                     reth_primitives::Block::decode(&mut block.rlp_bytes().to_vec().as_slice())?;
 
@@ -159,7 +367,14 @@ impl BitfinityEvmClient {
 
         info!(blocks = headers.len(), "Initialized remote client");
 
-        Ok(Self { headers, hash_to_number, bodies })
+        Ok(Self {
+            rpc_config: config,
+            client: client.client,
+            using_backup: client.using_backup,
+            headers,
+            hash_to_number,
+            bodies,
+        })
     }
 
     /// Get the remote tip hash of the chain.
@@ -196,39 +411,72 @@ impl BitfinityEvmClient {
 
     /// Fetch Bitfinity chain spec
     pub async fn fetch_chain_spec(rpc: String) -> Result<ChainSpec> {
-        let client =
-            ethereum_json_rpc_client::EthJsonRpcClient::new(ReqwestClient::new(rpc.clone()));
+        Self::build_chain_spec(&rpc).await
+    }
 
-        let chain_id = client.get_chain_id().await.map_err(|e| eyre::eyre!(e))?;
+    /// Fetch Bitfinity chain spec with fallback
+    pub async fn fetch_chain_spec_with_fallback(
+        primary_rpc: String,
+        backup_rpc: Option<String>,
+    ) -> Result<ChainSpec> {
+        match Self::build_chain_spec(&primary_rpc).await {
+            Ok(spec) => Ok(spec),
+            Err(e) => {
+                warn!(target: "downloaders::bitfinity_evm_client", "Failed to fetch chain spec from primary URL: {}. Trying backup URL", e);
+
+                if let Some(backup_rpc) = backup_rpc {
+                    match Self::build_chain_spec(&backup_rpc).await {
+                        Ok(spec) => Ok(spec),
+                        Err(e) => {
+                            error!(target: "downloaders::bitfinity_evm_client", "Failed to fetch chain spec from backup URL: {}", e);
+
+                            Err(e)
+                        }
+                    }
+                } else {
+                    error!(target: "downloaders::bitfinity_evm_client", "No backup URL provided, failed to fetch chain spec from primary URL: {}", e);
+
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    async fn build_chain_spec(url: &str) -> Result<ChainSpec> {
+        let rpc_client = Self::create_client(url);
+
+        let chain_id = rpc_client
+            .get_chain_id()
+            .await
+            .map_err(|e| eyre::eyre!("error getting chain id: {}", e))?;
 
         tracing::info!("downloaders::bitfinity_evm_client - Bitfinity chain id: {}", chain_id);
 
-        let genesis_block = client
+        let genesis_block = rpc_client
             .get_block_by_number(0.into())
             .await
             .map_err(|e| eyre::eyre!("error getting genesis block: {}", e))?;
 
-        let genesis_accounts =
-            client.get_genesis_balances().await.map_err(|e| eyre::eyre!(e))?.into_iter().map(
-                |(k, v)| {
-                    tracing::info!(
-                        "downloaders::bitfinity_evm_client - Bitfinity genesis account: {:?} {:?}",
-                        k,
-                        v
-                    );
-                    (
-                        k.0.into(),
-                        GenesisAccount { balance: Uint::from_limbs(v.0), ..Default::default() },
-                    )
-                },
-            );
+        let genesis_accounts = rpc_client
+            .get_genesis_balances()
+            .await
+            .map_err(|e| eyre::eyre!("error getting genesis accounts: {}", e))?
+            .into_iter()
+            .map(|(k, v)| {
+                tracing::info!(
+                    "downloaders::bitfinity_evm_client - Bitfinity genesis account: {:?} {:?}",
+                    k,
+                    v
+                );
+                (
+                    k.0.into(),
+                    GenesisAccount { balance: Uint::from_limbs(v.0), ..Default::default() },
+                )
+            });
 
         let chain = Chain::from_id(chain_id);
-
         let mut genesis: Genesis = serde_json::from_value(json!(genesis_block))
             .map_err(|e| eyre::eyre!("error parsing genesis block: {}", e))?;
-
-        tracing::info!("downloaders::bitfinity_evm_client - Bitfinity genesis: {:?}", genesis);
 
         genesis.config = ChainConfig {
             chain_id,
@@ -242,7 +490,7 @@ impl BitfinityEvmClient {
 
         genesis.alloc = genesis_accounts.collect();
 
-        let spec = ChainSpec {
+        Ok(ChainSpec {
             chain,
             genesis_hash: genesis_block.hash.map(|h| h.0.into()),
             genesis,
@@ -267,12 +515,8 @@ impl BitfinityEvmClient {
             deposit_contract: None,
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: 0,
-            bitfinity_evm_url: Some(rpc),
-        };
-
-        tracing::info!("downloaders::bitfinity_evm_client - Bitfinity chain_spec: {:?}", spec);
-
-        Ok(spec)
+            bitfinity_evm_url: Some(url.to_string()),
+        })
     }
 
     /// Use the provided bodies as the remote client's block body buffer.
@@ -299,7 +543,7 @@ struct BlockCertificateChecker {
 
 impl BlockCertificateChecker {
     async fn new(
-        client: &EthJsonRpcClient<ReqwestClient>,
+        client: &BitfinityEvmClient,
         certificate_settings: CertificateCheckSettings,
     ) -> Result<Self, RemoteClientError> {
         let evmc_principal =
@@ -310,9 +554,13 @@ impl BlockCertificateChecker {
             RemoteClientError::CertificateError(format!("failed to parse IC root key: {e}"))
         })?;
         let certified_data = client
-            .get_last_certified_block()
+            .execute_with_retry(|client| {
+                let client = client.clone();
+                async move { client.get_last_certified_block().await }
+            })
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
+
         Ok(Self {
             certified_data: CertifiedResult {
                 data: did::Block::from(certified_data.data),
@@ -450,8 +698,8 @@ impl BodiesClient for BitfinityEvmClient {
                 Some(body) => bodies.push(body),
                 None => {
                     error!(%hash, "Could not find body for requested block hash");
-                    return Box::pin(async move { Err(RequestError::BadResponse) })
-                },
+                    return Box::pin(async move { Err(RequestError::BadResponse) });
+                }
             }
         }
 
@@ -477,19 +725,35 @@ mod tests {
 
     #[tokio::test]
     async fn bitfinity_remote_client_from_rpc_url() {
+        let config = RpcClientConfig {
+            primary_url: "https://cloudflare-eth.com".to_string(),
+            backup_url: None,
+            max_retries: 5,
+            retry_delay: Duration::from_secs(1),
+        };
+
         let client =
-            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, 1000, None)
-                .await
-                .unwrap();
+            BitfinityEvmClient::from_rpc_url(config, 0, Some(5), 5, 1000, None).await.unwrap();
         assert!(client.max_block().is_some());
     }
 
     #[tokio::test]
     async fn bitfinity_test_headers_client() {
-        let client =
-            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, 1000, None)
-                .await
-                .unwrap();
+        let client = BitfinityEvmClient::from_rpc_url(
+            RpcClientConfig {
+                primary_url: "https://cloudflare-eth.com".to_string(),
+                backup_url: None,
+                max_retries: 5,
+                retry_delay: Duration::from_secs(1),
+            },
+            0,
+            Some(5),
+            5,
+            1000,
+            None,
+        )
+        .await
+        .unwrap();
         let headers = client
             .get_headers_with_priority(
                 HeadersRequest {
@@ -506,10 +770,21 @@ mod tests {
 
     #[tokio::test]
     async fn bitfinity_test_bodies_client() {
-        let client =
-            BitfinityEvmClient::from_rpc_url("https://cloudflare-eth.com", 0, Some(5), 5, 1000, None)
-                .await
-                .unwrap();
+        let client = BitfinityEvmClient::from_rpc_url(
+            RpcClientConfig {
+                primary_url: "https://cloudflare-eth.com".to_string(),
+                backup_url: None,
+                max_retries: 5,
+                retry_delay: Duration::from_secs(1),
+            },
+            0,
+            Some(5),
+            5,
+            1000,
+            None,
+        )
+        .await
+        .unwrap();
         let headers = client
             .get_headers_with_priority(
                 HeadersRequest {

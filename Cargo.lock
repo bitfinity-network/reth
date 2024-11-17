@@ -7733,6 +7733,7 @@ dependencies = [
  "ic-certification",
  "itertools 0.13.0",
  "metrics",
+ "parking_lot 0.12.3",
  "pin-project",
  "rand 0.8.5",
  "rayon",

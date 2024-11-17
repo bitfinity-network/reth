@@ -45,6 +45,7 @@ metrics.workspace = true
 tracing.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
+parking_lot.workspace = true
 
 tempfile = { workspace = true, optional = true }
 itertools.workspace = true
