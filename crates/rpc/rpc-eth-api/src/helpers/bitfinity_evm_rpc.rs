@@ -2,17 +2,26 @@
 
 use std::sync::Arc;
 
+use alloy_rlp::Decodable;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
 use futures::Future;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
-use reth_rpc_server_types::result::internal_rpc_err;
+use reth_primitives::TransactionSigned;
+use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use revm_primitives::{Address, Bytes, B256, U256};
+
+use crate::RawTransactionForwarder;
 
 /// Proxy to the Bitfinity EVM RPC.
 pub trait BitfinityEvmRpc {
-    /// Returns the ChainSpec.
+    /// Returns raw transactions forwarder.
+    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
+        None
+    }
+
+    /// Returns the `ChainSpec`.
     fn chain_spec(&self) -> Arc<ChainSpec>;
 
     /// Forwards `eth_gasPrice` calls to the Bitfinity EVM.
@@ -52,7 +61,22 @@ pub trait BitfinityEvmRpc {
     /// Forwards `eth_sendRawTransaction` calls to the Bitfinity EVM
     fn send_raw_transaction(&self, tx: Bytes) -> impl Future<Output = RpcResult<B256>> + Send {
         let chain_spec = self.chain_spec();
+        let forwarder = self.raw_tx_forwarder();
+
         async move {
+            // If tx_forwarder is set, use it.
+            if let Some(forwarder) = forwarder {
+                let typed_tx = TransactionSigned::decode(&mut tx.as_ref()).map_err(|e| {
+                    invalid_params_rpc_err(format!(
+                        "failed to decode eth_sendRawTransaction input: {e}"
+                    ))
+                })?;
+                let hash = typed_tx.hash();
+                forwarder.forward_raw_transaction(&tx).await?;
+                return Ok(hash);
+            }
+
+            // Otherwise, send tx directly.
             let (rpc_url, client) = get_client(&chain_spec)?;
 
             let tx_hash = client.send_raw_transaction_bytes(&tx).await.map_err(|e| {
@@ -94,7 +118,7 @@ pub trait BitfinityEvmRpc {
         async move {
             let (rpc_url, client) = get_client(&chain_spec)?;
 
-            let certified_block  = client.get_last_certified_block().await.map_err(|e| {
+            let certified_block = client.get_last_certified_block().await.map_err(|e| {
                 internal_rpc_err(format!(
                     "failed to forward get_last_certified_block request to {}: {}",
                     rpc_url, e
