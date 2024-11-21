@@ -9,11 +9,21 @@ use reth_rpc_eth_types::{EthApiError, EthResult};
 use tokio::sync::Mutex;
 use tracing::warn;
 
-/// Command to send transactions by timer.
+/// Forwarder to push transactions to the priority queue.
 #[derive(Debug)]
 pub struct BitfinityTransactionsForwarder {
     queue: Arc<Mutex<TransactionsPriorityQueue>>,
     chain_spec: Arc<ChainSpec>,
+}
+
+impl BitfinityTransactionsForwarder {
+    /// Creates new forwarder with the given parameters.
+    pub const fn new(
+        queue: Arc<Mutex<TransactionsPriorityQueue>>,
+        chain_spec: Arc<ChainSpec>,
+    ) -> Self {
+        Self { queue, chain_spec }
+    }
 }
 
 #[async_trait::async_trait]
@@ -32,22 +42,27 @@ impl RawTransactionForwarder for BitfinityTransactionsForwarder {
     }
 }
 
+/// Priority queue to get transactions sorted by gas price.
 #[derive(Debug, Default)]
 pub struct TransactionsPriorityQueue(BTreeMap<U256, Bytes>);
 
 impl TransactionsPriorityQueue {
+    /// Adds the tx with the given gas price.
     pub fn push(&mut self, gas_price: U256, tx: Bytes) {
         self.0.insert(gas_price, tx);
     }
 
+    /// Returns tx with highest gas price, if present.
     pub fn pop_tx_with_highest_price(&mut self) -> Option<(U256, Bytes)> {
         self.0.pop_last()
     }
 
+    /// Number of transactions in the queue.
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
+    /// Returns true if length == 0.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

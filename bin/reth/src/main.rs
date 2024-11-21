@@ -1,5 +1,12 @@
 #![allow(missing_docs)]
 
+use std::sync::Arc;
+
+use reth::commands::bitfinity_send_raw_txs::{
+    BitfinityTransactionsForwarder, TransactionsPriorityQueue,
+};
+use tokio::sync::Mutex;
+
 // We use jemalloc for performance reasons.
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
@@ -8,7 +15,7 @@ static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 #[cfg(all(feature = "optimism", not(test)))]
 compile_error!("Cannot build the `reth` binary with the `optimism` feature flag enabled. Did you mean to build `op-reth`?");
 
-#[cfg(not(feature = "optimism"))]
+// #[cfg(not(feature = "optimism"))]
 fn main() {
     use reth::cli::Cli;
     use reth::commands::bitfinity_import::BitfinityImportCommand;
@@ -22,7 +29,17 @@ fn main() {
     }
 
     if let Err(err) = Cli::parse_args().run(|builder, _| async {
-        let handle = builder.launch_node(EthereumNode::default()).await?;
+        let handle = builder
+            .node(EthereumNode::default())
+            .extend_rpc_modules(move |ctx| {
+                let chain_spec = ctx.config().chain.clone();
+                let queue = Arc::new(Mutex::new(TransactionsPriorityQueue::default()));
+                let forwarder = BitfinityTransactionsForwarder::new(queue, chain_spec);
+                ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(forwarder));
+                Ok(())
+            })
+            .launch()
+            .await?;
 
         let blockchain_provider = handle.node.provider.clone();
         let config = handle.node.config.config.clone();
