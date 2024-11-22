@@ -96,10 +96,11 @@ impl BitfinityImportCommand {
     /// Schedule the import job and return a handle to it.
     pub async fn schedule_execution(
         self,
+        job_executor: Option<JobExecutor>,
     ) -> eyre::Result<(JobExecutor, tokio::task::JoinHandle<()>)> {
         info!(target: "reth::cli - BitfinityImportCommand", "reth {} starting", SHORT_VERSION);
 
-        let job_executor = JobExecutor::new_with_local_tz();
+        let job_executor = job_executor.unwrap_or_else(JobExecutor::new_with_local_tz);
 
         // Schedule the import job
         {

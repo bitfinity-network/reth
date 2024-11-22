@@ -83,7 +83,7 @@ pub async fn import_blocks(
         import_data.provider_factory.clone(),
         import_data.blockchain_db,
     );
-    let (job_executor, _import_handle) = import.schedule_execution().await.unwrap();
+    let (job_executor, _import_handle) = import.schedule_execution(None).await.unwrap();
     wait_until_local_block_imported(&import_data.provider_factory, end_block, timeout).await;
 
     if shutdown_when_done {
@@ -153,6 +153,11 @@ pub async fn bitfinity_import_config_data(
         backup_rpc_url: backup_evm_datasource_url,
         max_retries: 3,
         retry_delay_secs: 3,
+        tx_queue: false,
+        tx_queue_size: 1000,
+        send_queued_txs_period_secs: 3,
+        queued_txs_batch_size: 10,
+        queued_txs_per_execution_threshold: 100,
     };
 
     Ok((
