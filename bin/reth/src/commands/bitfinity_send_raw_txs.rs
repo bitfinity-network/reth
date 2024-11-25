@@ -1,3 +1,5 @@
+//! Utils for raw transaction batching.
+
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use crate::primitives::ruint::Uint;
@@ -236,4 +238,72 @@ impl TransactionsPriorityQueue {
 struct TxKey {
     gas_price: U256,
     hash: H256,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TransactionsPriorityQueue;
+    use crate::primitives::U256;
+    use alloy_rlp::Bytes;
+    use reth_primitives::TransactionSigned;
+    use reth_transaction_pool::test_utils::MockTransaction;
+    use reth_transaction_pool::PoolTransaction;
+
+    #[test]
+    fn test_pop_order() {
+        let mut queue = TransactionsPriorityQueue::new(10);
+        let tx1 = transaction_with_gas_price(100);
+        let tx2 = transaction_with_gas_price(300);
+        let tx3 = transaction_with_gas_price(200);
+
+        let tx1_bytes: Bytes = alloy_rlp::encode(&tx1).into();
+        let tx2_bytes: Bytes = alloy_rlp::encode(&tx2).into();
+        let tx3_bytes: Bytes = alloy_rlp::encode(&tx3).into();
+
+        queue.push(U256::from(tx1.effective_gas_price(None)), tx1_bytes.clone());
+        queue.push(U256::from(tx2.effective_gas_price(None)), tx2_bytes.clone());
+        queue.push(U256::from(tx3.effective_gas_price(None)), tx3_bytes.clone());
+
+        let expected_order = [tx2_bytes, tx3_bytes, tx1_bytes];
+        for expected_tx in expected_order {
+            let popped_tx = queue.pop_tx_with_highest_price().unwrap().1;
+            assert_eq!(popped_tx, expected_tx);
+        }
+
+        assert!(queue.is_empty())
+    }
+
+    #[test]
+    fn test_size_limit_should_shrink_tx_with_lowest_price() {
+        let mut queue = TransactionsPriorityQueue::new(2);
+        let tx1 = transaction_with_gas_price(100);
+        let tx2 = transaction_with_gas_price(300);
+        let tx3 = transaction_with_gas_price(200);
+
+        let tx1_bytes: Bytes = alloy_rlp::encode(&tx1).into();
+        let tx2_bytes: Bytes = alloy_rlp::encode(&tx2).into();
+        let tx3_bytes: Bytes = alloy_rlp::encode(&tx3).into();
+
+        queue.push(U256::from(tx1.effective_gas_price(None)), tx1_bytes);
+        queue.push(U256::from(tx2.effective_gas_price(None)), tx2_bytes.clone());
+        queue.push(U256::from(tx3.effective_gas_price(None)), tx3_bytes.clone());
+
+        let expected_order = [tx2_bytes, tx3_bytes];
+        for expected_tx in expected_order {
+            let popped_tx = queue.pop_tx_with_highest_price().unwrap().1;
+            assert_eq!(popped_tx, expected_tx);
+        }
+
+        assert!(queue.is_empty())
+    }
+
+    fn transaction_with_gas_price(gas_price: u128) -> TransactionSigned {
+        let tx = MockTransaction::legacy().with_gas_price(gas_price);
+
+        TransactionSigned {
+            hash: *tx.hash(),
+            signature: Default::default(),
+            transaction: tx.into(),
+        }
+    }
 }

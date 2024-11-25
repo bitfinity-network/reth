@@ -12,6 +12,9 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use rand::RngCore;
+use reth::commands::bitfinity_send_raw_txs::{
+    BitfinityTransactionSender, BitfinityTransactionsForwarder, TransactionsPriorityQueue,
+};
 use reth::{
     args::{DatadirArgs, RpcServerArgs},
     dirs::{DataDirPath, MaybePlatformPath},
@@ -22,7 +25,9 @@ use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_ethereum::EthereumNode;
 use reth_tasks::TaskManager;
 use revm_primitives::{Address, U256};
+use std::time::Duration;
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
+use tokio::sync::Mutex;
 
 #[tokio::test]
 async fn bitfinity_test_should_start_local_reth_node() {
@@ -62,7 +67,6 @@ async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
         .unwrap();
 
     assert_eq!(result.certificate, vec![1u8, 3, 11]);
-
 }
 
 #[tokio::test]
@@ -257,14 +261,40 @@ async fn start_reth_node(
         Arc::new(init_db(data_dir.db(), Default::default()).unwrap())
     };
 
+    let queue = Arc::new(Mutex::new(TransactionsPriorityQueue::new(1000)));
+    let queue_clone = Arc::clone(&queue);
+
     let node_handle = NodeBuilder::new(node_config)
         .with_database(database)
         .with_launch_context(tasks.executor())
-        .launch_node(EthereumNode::default())
+        .node(EthereumNode::default())
+        .extend_rpc_modules(|ctx| {
+            let forwarder_required = ctx.config().bitfinity_import_arg.tx_queue;
+            if forwarder_required {
+                // Add custom forwarder with transactions priority queue.
+                queue
+                    .blocking_lock()
+                    .set_size_limit(ctx.config().bitfinity_import_arg.tx_queue_size as _);
+
+                let forwarder = BitfinityTransactionsForwarder::new(queue);
+                ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(forwarder));
+            }
+
+            Ok(())
+        })
+        .launch()
         .await
         .unwrap();
 
     let reth_address = node_handle.node.rpc_server_handle().http_local_addr().unwrap();
+    let transaction_sending = BitfinityTransactionSender::new(
+        queue_clone,
+        node_handle.node.chain_spec(),
+        Duration::from_secs(1),
+        10,
+        100,
+    );
+    let _sending_handle = transaction_sending.schedule_execution(None).await.unwrap();
 
     let client: EthJsonRpcClient<ReqwestClient> =
         EthJsonRpcClient::new(ReqwestClient::new(format!("http://{}", reth_address)));
@@ -311,7 +341,6 @@ pub mod eth_server {
 
         #[method(name = "getLastCertifiedBlock", aliases = ["ic_getLastCertifiedBlock"])]
         async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>>;
-
     }
 
     #[derive(Debug)]
@@ -356,10 +385,10 @@ pub mod eth_server {
         }
 
         async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>> {
-            Ok(CertifiedResult { 
-                data: Default::default(), 
-                witness: vec![], 
-                certificate: vec![1u8, 3, 11] 
+            Ok(CertifiedResult {
+                data: Default::default(),
+                witness: vec![],
+                certificate: vec![1u8, 3, 11],
             })
         }
     }

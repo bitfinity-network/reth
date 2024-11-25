@@ -2,8 +2,6 @@
 //!
 use std::sync::Arc;
 
-use alloy_primitives::Uint;
-use reth_primitives::TransactionSigned;
 use reth_provider::ChainSpecProvider;
 use reth_rpc_eth_api::{helpers::bitfinity_evm_rpc::BitfinityEvmRpc, RawTransactionForwarder};
 
