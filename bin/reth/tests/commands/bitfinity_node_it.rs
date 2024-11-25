@@ -25,7 +25,7 @@ use reth_node_ethereum::EthereumNode;
 use reth_primitives::{Transaction, TransactionSigned};
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::MockTransaction;
-use revm_primitives::{hex, Address, U256};
+use revm_primitives::{Address, U256};
 use std::time::Duration;
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 use tokio::sync::Mutex;
@@ -182,7 +182,6 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
 
     // Create a random transaction
     let tx = transaction_with_gas_price(100);
-    // let codec = TransactionSigned::decode(&mut alloy_rlp::encode(&tx).as_ref()).unwrap();
     let encoded = alloy_rlp::encode(&tx);
     let expected_tx_hash = keccak::keccak_hash(&encoded);
 
@@ -192,34 +191,41 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     // Assert
     assert_eq!(result.to_fixed_bytes(), expected_tx_hash.0.to_fixed_bytes());
 
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     assert_eq!(eth_server::TXS_ORDER.lock().await[0].0, expected_tx_hash.0.to_fixed_bytes());
 }
 
-// #[tokio::test]
-// async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
-//     // Arrange
-//     let _log = init_logs();
+#[tokio::test]
+async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
+    // Arrange
+    let _log = init_logs();
 
-//     let eth_server = EthImpl::new();
-//     let (_server, eth_server_address) =
-//         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
-//     let (reth_client, _reth_node) =
-//         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+    let eth_server = EthImpl::new();
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let (reth_client, _reth_node) =
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
-//     // Create a random transaction
-//     let mut tx = [0u8; 256];
-//     rand::thread_rng().fill_bytes(&mut tx);
-//     let expected_tx_hash =
-//         keccak::keccak_hash(format!("0x{}", reth_primitives::hex::encode(tx)).as_bytes());
+    // Create a random transactions
+    let transactions = (1..=10)
+        .map(|i| alloy_rlp::encode(transaction_with_gas_price(100 * i)))
+        .collect::<Vec<_>>();
 
-//     // Act
-//     let result = reth_client.send_raw_transaction_bytes(&tx).await;
+    let expected_hashes = transactions.iter().map(|tx| keccak::keccak_hash(tx)).collect::<Vec<_>>();
 
-//     // Assert
-//     assert_eq!(result.unwrap(), expected_tx_hash.0);
-// }
+    // Act
+    for (tx, expected_hash) in transactions.iter().zip(expected_hashes.iter()) {
+        let hash = reth_client.send_raw_transaction_bytes(tx).await.unwrap();
+        assert_eq!(hash.to_fixed_bytes(), expected_hash.0.to_fixed_bytes());
+    }
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    for (idx, expected_hash) in expected_hashes.iter().rev().enumerate() {
+        assert_eq!(eth_server::TXS_ORDER.lock().await[idx].0, expected_hash.0.to_fixed_bytes());
+    }
+}
 
 fn transaction_with_gas_price(gas_price: u128) -> TransactionSigned {
     let mock = MockTransaction::legacy().with_gas_price(gas_price);
