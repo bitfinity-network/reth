@@ -11,7 +11,6 @@ use jsonrpsee::{
     server::{Server, ServerHandle},
     Methods, RpcModule,
 };
-use rand::RngCore;
 use reth::commands::bitfinity_send_raw_txs::{
     BitfinityTransactionSender, BitfinityTransactionsForwarder, TransactionsPriorityQueue,
 };
@@ -23,8 +22,10 @@ use reth_consensus::Consensus;
 use reth_db::{init_db, test_utils::tempdir_path};
 use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_ethereum::EthereumNode;
+use reth_primitives::{Transaction, TransactionSigned};
 use reth_tasks::TaskManager;
-use revm_primitives::{Address, U256};
+use reth_transaction_pool::test_utils::MockTransaction;
+use revm_primitives::{hex, Address, U256};
 use std::time::Duration;
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 use tokio::sync::Mutex;
@@ -180,16 +181,51 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Create a random transaction
-    let mut tx = [0u8; 256];
-    rand::thread_rng().fill_bytes(&mut tx);
-    let expected_tx_hash =
-        keccak::keccak_hash(format!("0x{}", reth_primitives::hex::encode(tx)).as_bytes());
+    let tx = transaction_with_gas_price(100);
+    // let codec = TransactionSigned::decode(&mut alloy_rlp::encode(&tx).as_ref()).unwrap();
+    let encoded = alloy_rlp::encode(&tx);
+    let expected_tx_hash = keccak::keccak_hash(&encoded);
 
     // Act
-    let result = reth_client.send_raw_transaction_bytes(&tx).await;
+    let result = reth_client.send_raw_transaction_bytes(&encoded).await.unwrap();
 
     // Assert
-    assert_eq!(result.unwrap(), expected_tx_hash.0);
+    assert_eq!(result.to_fixed_bytes(), expected_tx_hash.0.to_fixed_bytes());
+
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    assert_eq!(eth_server::TXS_ORDER.lock().await[0].0, expected_tx_hash.0.to_fixed_bytes());
+}
+
+// #[tokio::test]
+// async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
+//     // Arrange
+//     let _log = init_logs();
+
+//     let eth_server = EthImpl::new();
+//     let (_server, eth_server_address) =
+//         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+//     let (reth_client, _reth_node) =
+//         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+
+//     // Create a random transaction
+//     let mut tx = [0u8; 256];
+//     rand::thread_rng().fill_bytes(&mut tx);
+//     let expected_tx_hash =
+//         keccak::keccak_hash(format!("0x{}", reth_primitives::hex::encode(tx)).as_bytes());
+
+//     // Act
+//     let result = reth_client.send_raw_transaction_bytes(&tx).await;
+
+//     // Assert
+//     assert_eq!(result.unwrap(), expected_tx_hash.0);
+// }
+
+fn transaction_with_gas_price(gas_price: u128) -> TransactionSigned {
+    let mock = MockTransaction::legacy().with_gas_price(gas_price);
+    let transaction: Transaction = mock.into();
+
+    TransactionSigned { hash: Default::default(), signature: Default::default(), transaction }
 }
 
 /// Start a local reth node
@@ -238,7 +274,7 @@ async fn start_reth_node(
     node_config.dev.dev = false;
 
     let mut chain = node_config.chain.as_ref().clone();
-    chain.bitfinity_evm_url = bitfinity_evm_url;
+    chain.bitfinity_evm_url = bitfinity_evm_url.clone();
     let mut node_config = node_config.with_chain(chain);
 
     let database = if let Some(import_data) = import_data {
@@ -269,16 +305,9 @@ async fn start_reth_node(
         .with_launch_context(tasks.executor())
         .node(EthereumNode::default())
         .extend_rpc_modules(|ctx| {
-            let forwarder_required = ctx.config().bitfinity_import_arg.tx_queue;
-            if forwarder_required {
-                // Add custom forwarder with transactions priority queue.
-                queue
-                    .blocking_lock()
-                    .set_size_limit(ctx.config().bitfinity_import_arg.tx_queue_size as _);
-
-                let forwarder = BitfinityTransactionsForwarder::new(queue);
-                ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(forwarder));
-            }
+            // Add custom forwarder with transactions priority queue.
+            let forwarder = BitfinityTransactionsForwarder::new(queue);
+            ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(forwarder));
 
             Ok(())
         })
@@ -286,18 +315,19 @@ async fn start_reth_node(
         .await
         .unwrap();
 
-    let reth_address = node_handle.node.rpc_server_handle().http_local_addr().unwrap();
     let transaction_sending = BitfinityTransactionSender::new(
         queue_clone,
-        node_handle.node.chain_spec(),
-        Duration::from_secs(1),
+        bitfinity_evm_url.unwrap_or_default(),
+        Duration::from_millis(100),
         10,
         100,
     );
     let _sending_handle = transaction_sending.schedule_execution(None).await.unwrap();
 
+    let reth_address = node_handle.node.rpc_server_handle().http_local_addr().unwrap();
+    let addr_string = format!("http://{}", reth_address);
     let client: EthJsonRpcClient<ReqwestClient> =
-        EthJsonRpcClient::new(ReqwestClient::new(format!("http://{}", reth_address)));
+        EthJsonRpcClient::new(ReqwestClient::new(addr_string));
 
     (client, node_handle)
 }
@@ -318,12 +348,12 @@ async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle, So
 }
 
 pub mod eth_server {
-
-    use alloy_rlp::Bytes;
-    use did::keccak;
+    use alloy_rlp::{Bytes, Decodable};
     use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-    use revm_primitives::{Address, B256, U256};
+    use reth_primitives::TransactionSigned;
+    use revm_primitives::{hex, Address, B256, U256};
+    use tokio::sync::Mutex;
 
     #[rpc(server, namespace = "eth")]
     pub trait Eth {
@@ -342,6 +372,8 @@ pub mod eth_server {
         #[method(name = "getLastCertifiedBlock", aliases = ["ic_getLastCertifiedBlock"])]
         async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>>;
     }
+
+    pub static TXS_ORDER: Mutex<Vec<B256>> = Mutex::const_new(Vec::new());
 
     #[derive(Debug)]
     pub struct EthImpl {
@@ -372,8 +404,11 @@ pub mod eth_server {
         }
 
         async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
-            let hash = keccak::keccak_hash(&tx);
-            Ok(hash.into())
+            let decoded = hex::decode(&tx).unwrap();
+            let tx = TransactionSigned::decode(&mut decoded.as_ref()).unwrap();
+            let hash = tx.hash();
+            TXS_ORDER.lock().await.push(hash);
+            Ok(hash)
         }
 
         async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>> {

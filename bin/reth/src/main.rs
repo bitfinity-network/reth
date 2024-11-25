@@ -73,11 +73,13 @@ fn main() {
         };
 
         if bitfinity.tx_queue {
+            let url = bitfinity.send_raw_transaction_rpc_url.unwrap_or(bitfinity.rpc_url);
+
             // Init transaction sending cycle.
             let period = Duration::from_secs(bitfinity.send_queued_txs_period_secs as _);
             let transaction_sending = BitfinityTransactionSender::new(
                 queue_clone,
-                chain_spec,
+                url,
                 period,
                 bitfinity.queued_txs_batch_size,
                 bitfinity.queued_txs_per_execution_threshold,

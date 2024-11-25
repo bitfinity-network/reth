@@ -68,7 +68,7 @@ pub trait BitfinityEvmRpc {
             if let Some(forwarder) = forwarder {
                 let typed_tx = TransactionSigned::decode(&mut tx.as_ref()).map_err(|e| {
                     invalid_params_rpc_err(format!(
-                        "failed to decode eth_sendRawTransaction input: {e}"
+                        "failed to decode eth_sendRawTransaction input {tx}: {e}"
                     ))
                 })?;
                 let hash = typed_tx.hash();
