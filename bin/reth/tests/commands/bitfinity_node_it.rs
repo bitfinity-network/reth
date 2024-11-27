@@ -45,7 +45,7 @@ async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new();
+    let eth_server = EthImpl::new().await;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
@@ -75,7 +75,7 @@ async fn bitfinity_test_node_forward_get_gas_price_requests() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new();
+    let eth_server = EthImpl::new().await;
     let gas_price = eth_server.gas_price;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
@@ -94,7 +94,7 @@ async fn bitfinity_test_node_forward_max_priority_fee_per_gas_requests() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new();
+    let eth_server = EthImpl::new().await;
     let max_priority_fee_per_gas = eth_server.max_priority_fee_per_gas;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
@@ -113,7 +113,7 @@ async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new();
+    let eth_server = EthImpl::new().await;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
@@ -147,7 +147,7 @@ async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new();
+    let eth_server = EthImpl::new().await;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
@@ -174,7 +174,7 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new();
+    let eth_server = EthImpl::new().await;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
@@ -191,7 +191,7 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     // Assert
     assert_eq!(result.to_fixed_bytes(), expected_tx_hash.0.to_fixed_bytes());
 
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     assert_eq!(eth_server::TXS_ORDER.lock().await[0].0, expected_tx_hash.0.to_fixed_bytes());
 }
@@ -201,7 +201,7 @@ async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new();
+    let eth_server = EthImpl::new().await;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
@@ -220,7 +220,7 @@ async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
         assert_eq!(hash.to_fixed_bytes(), expected_hash.0.to_fixed_bytes());
     }
 
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     for (idx, expected_hash) in expected_hashes.iter().rev().enumerate() {
         assert_eq!(eth_server::TXS_ORDER.lock().await[idx].0, expected_hash.0.to_fixed_bytes());
@@ -324,7 +324,7 @@ async fn start_reth_node(
     let transaction_sending = BitfinityTransactionSender::new(
         queue_clone,
         bitfinity_evm_url.unwrap_or_default(),
-        Duration::from_millis(1000),
+        Duration::from_millis(200),
         10,
         100,
     );
@@ -388,7 +388,8 @@ pub mod eth_server {
     }
 
     impl EthImpl {
-        pub fn new() -> Self {
+        pub async fn new() -> Self {
+            TXS_ORDER.lock().await.clear();
             Self { gas_price: rand::random(), max_priority_fee_per_gas: rand::random() }
         }
     }
