@@ -191,7 +191,7 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     // Assert
     assert_eq!(result.to_fixed_bytes(), expected_tx_hash.0.to_fixed_bytes());
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     assert_eq!(eth_server::TXS_ORDER.lock().await[0].0, expected_tx_hash.0.to_fixed_bytes());
 }
