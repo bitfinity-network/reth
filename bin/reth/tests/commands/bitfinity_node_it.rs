@@ -394,12 +394,6 @@ pub mod eth_server {
         }
     }
 
-    impl Default for EthImpl {
-        fn default() -> Self {
-            Self::new()
-        }
-    }
-
     #[async_trait::async_trait]
     impl EthServer for EthImpl {
         async fn gas_price(&self) -> RpcResult<U256> {
