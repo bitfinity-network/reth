@@ -324,7 +324,7 @@ async fn start_reth_node(
     let transaction_sending = BitfinityTransactionSender::new(
         queue_clone,
         bitfinity_evm_url.unwrap_or_default(),
-        Duration::from_millis(100),
+        Duration::from_millis(1000),
         10,
         100,
     );
