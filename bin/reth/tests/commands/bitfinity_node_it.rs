@@ -25,7 +25,7 @@ use reth_node_ethereum::EthereumNode;
 use reth_primitives::{Transaction, TransactionSigned};
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::MockTransaction;
-use revm_primitives::{Address, U256};
+use revm_primitives::{Address, B256, U256};
 use std::time::Duration;
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 use tokio::sync::Mutex;
@@ -45,7 +45,7 @@ async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new().await;
+    let eth_server = EthImpl::new();
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
@@ -75,7 +75,7 @@ async fn bitfinity_test_node_forward_get_gas_price_requests() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new().await;
+    let eth_server = EthImpl::new();
     let gas_price = eth_server.gas_price;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
@@ -94,7 +94,7 @@ async fn bitfinity_test_node_forward_max_priority_fee_per_gas_requests() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new().await;
+    let eth_server = EthImpl::new();
     let max_priority_fee_per_gas = eth_server.max_priority_fee_per_gas;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
@@ -113,7 +113,7 @@ async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new().await;
+    let eth_server = EthImpl::new();
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
@@ -147,7 +147,7 @@ async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new().await;
+    let eth_server = EthImpl::new();
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
@@ -174,7 +174,9 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new().await;
+    let eth_server = EthImpl::new();
+    let received_txs = eth_server.txs.clone();
+
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
@@ -191,9 +193,9 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     // Assert
     assert_eq!(result.to_fixed_bytes(), expected_tx_hash.0.to_fixed_bytes());
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(check_transactions_received(&received_txs, 1).await);
 
-    assert_eq!(eth_server::TXS_ORDER.lock().await[0].0, expected_tx_hash.0.to_fixed_bytes());
+    assert_eq!(received_txs.lock().await[0].0, expected_tx_hash.0.to_fixed_bytes());
 }
 
 #[tokio::test]
@@ -201,15 +203,19 @@ async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
     // Arrange
     let _log = init_logs();
 
-    let eth_server = EthImpl::new().await;
+    let eth_server = EthImpl::new();
+    let received_txs = eth_server.txs.clone();
+
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
+    const TXS_NUMBER: usize = 10;
+
     // Create a random transactions
-    let transactions = (1..=10)
-        .map(|i| alloy_rlp::encode(transaction_with_gas_price(100 * i)))
+    let transactions = (1..=TXS_NUMBER)
+        .map(|i| alloy_rlp::encode(transaction_with_gas_price(100 * i as u128)))
         .collect::<Vec<_>>();
 
     let expected_hashes = transactions.iter().map(|tx| keccak::keccak_hash(tx)).collect::<Vec<_>>();
@@ -220,11 +226,29 @@ async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
         assert_eq!(hash.to_fixed_bytes(), expected_hash.0.to_fixed_bytes());
     }
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(check_transactions_received(&received_txs, TXS_NUMBER).await);
 
     for (idx, expected_hash) in expected_hashes.iter().rev().enumerate() {
-        assert_eq!(eth_server::TXS_ORDER.lock().await[idx].0, expected_hash.0.to_fixed_bytes());
+        assert_eq!(received_txs.lock().await[idx].0, expected_hash.0.to_fixed_bytes());
     }
+}
+
+/// Waits until `n` transactions appear in `received_txs` with one second timeout.
+/// Returns true if `received_txs` contains at least `n` transactions.
+async fn check_transactions_received(received_txs: &Mutex<Vec<B256>>, n: usize) -> bool {
+    let wait_future = async {
+        loop {
+            let txs_number = received_txs.lock().await.len();
+            if txs_number >= n {
+                break;
+            }
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    };
+
+    let wait_result = tokio::time::timeout(Duration::from_secs(3), wait_future).await;
+    wait_result.is_ok()
 }
 
 fn transaction_with_gas_price(gas_price: u128) -> TransactionSigned {
@@ -354,6 +378,8 @@ async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle, So
 }
 
 pub mod eth_server {
+    use std::sync::Arc;
+
     use alloy_rlp::{Bytes, Decodable};
     use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
@@ -379,18 +405,26 @@ pub mod eth_server {
         async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>>;
     }
 
-    pub static TXS_ORDER: Mutex<Vec<B256>> = Mutex::const_new(Vec::new());
-
     #[derive(Debug)]
     pub struct EthImpl {
         pub gas_price: u128,
         pub max_priority_fee_per_gas: u128,
+        pub txs: Arc<Mutex<Vec<B256>>>,
     }
 
     impl EthImpl {
-        pub async fn new() -> Self {
-            TXS_ORDER.lock().await.clear();
-            Self { gas_price: rand::random(), max_priority_fee_per_gas: rand::random() }
+        pub fn new() -> Self {
+            Self {
+                gas_price: rand::random(),
+                max_priority_fee_per_gas: rand::random(),
+                txs: Arc::default(),
+            }
+        }
+    }
+
+    impl Default for EthImpl {
+        fn default() -> Self {
+            Self::new()
         }
     }
 
@@ -408,7 +442,7 @@ pub mod eth_server {
             let decoded = hex::decode(&tx).unwrap();
             let tx = TransactionSigned::decode(&mut decoded.as_ref()).unwrap();
             let hash = tx.hash();
-            TXS_ORDER.lock().await.push(hash);
+            self.txs.lock().await.push(hash);
             Ok(hash)
         }
 

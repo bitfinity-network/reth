@@ -36,7 +36,8 @@ use tracing::{debug, info};
 
 pub const LOCAL_EVM_CANISTER_ID: &str = "bkyz2-fmaaa-aaaaa-qaaaq-cai";
 /// EVM block extractor for devnet running on Digital Ocean.
-pub const DEFAULT_EVM_DATASOURCE_URL: &str = "https://orca-app-5yyst.ondigitalocean.app";
+pub const DEFAULT_EVM_DATASOURCE_URL: &str =
+    "https://block-extractor-testnet-1052151659755.europe-west9.run.app";
 
 pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
     let mut tracer = RethTracer::new();
