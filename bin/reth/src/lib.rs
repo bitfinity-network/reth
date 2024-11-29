@@ -29,6 +29,7 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+pub mod bitfinity_tasks;
 pub mod cli;
 pub mod commands;
 mod macros;

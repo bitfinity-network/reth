@@ -2,7 +2,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use reth::commands::bitfinity_send_raw_txs::{
+use reth::bitfinity_tasks::send_txs::{
     BitfinityTransactionSender, BitfinityTransactionsForwarder, TransactionsPriorityQueue,
 };
 use tokio::sync::Mutex;
