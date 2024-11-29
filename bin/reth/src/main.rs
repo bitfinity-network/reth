@@ -40,7 +40,7 @@ fn main() {
                     // Add custom forwarder with transactions priority queue.
                     queue
                         .blocking_lock()
-                        .set_size_limit(ctx.config().bitfinity_import_arg.tx_queue_size as _);
+                        .set_size_limit(ctx.config().bitfinity_import_arg.tx_queue_size);
 
                     let forwarder = BitfinityTransactionsForwarder::new(queue);
                     ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(forwarder));
@@ -76,7 +76,7 @@ fn main() {
             let url = bitfinity.send_raw_transaction_rpc_url.unwrap_or(bitfinity.rpc_url);
 
             // Init transaction sending cycle.
-            let period = Duration::from_secs(bitfinity.send_queued_txs_period_secs as _);
+            let period = Duration::from_secs(bitfinity.send_queued_txs_period_secs);
             let transaction_sending = BitfinityTransactionSender::new(
                 queue_clone,
                 url,

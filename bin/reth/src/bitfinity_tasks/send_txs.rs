@@ -26,8 +26,8 @@ pub struct BitfinityTransactionSender {
     queue: SharedQueue,
     rpc_url: String,
     period: Duration,
-    batch_size: u32,
-    txs_per_execution_threshold: u32,
+    batch_size: usize,
+    txs_per_execution_threshold: usize,
 }
 
 impl BitfinityTransactionSender {
@@ -36,8 +36,8 @@ impl BitfinityTransactionSender {
         queue: SharedQueue,
         rpc_url: String,
         period: Duration,
-        batch_size: u32,
-        txs_per_execution_threshold: u32,
+        batch_size: usize,
+        txs_per_execution_threshold: usize,
     ) -> Self {
         Self { queue, rpc_url, period, batch_size, txs_per_execution_threshold }
     }
@@ -90,14 +90,14 @@ impl BitfinityTransactionSender {
             }
 
             total_sent += to_send.len();
-            if total_sent > self.txs_per_execution_threshold as usize {
+            if total_sent > self.txs_per_execution_threshold {
                 return Ok(());
             }
         }
     }
 
     async fn get_transactions_to_send(&self) -> Vec<(U256, Vec<u8>)> {
-        let mut batch = Vec::with_capacity(self.batch_size as _);
+        let mut batch = Vec::with_capacity(self.batch_size);
         let mut queue = self.queue.lock().await;
         let txs_to_pop = self.batch_size.max(1); // if batch size is zero, take at least one tx.
 

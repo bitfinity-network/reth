@@ -32,7 +32,6 @@ reth-rpc-server-types.workspace = true
 
 # ethereum
 alloy-dyn-abi = { workspace = true, features = ["eip712"] }
-alloy-rlp.workspace = true
 
 # rpc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
@@ -49,6 +48,7 @@ dyn-clone.workspace = true
 tracing.workspace = true
 
 # Bitfinity dependencies
+alloy-rlp.workspace = true
 ethereum-json-rpc-client.workspace = true
 
 [features]
