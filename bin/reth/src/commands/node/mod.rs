@@ -1,9 +1,8 @@
 //! Main node command for launching a node
 
 use crate::args::{
-    utils::parse_socket_address,
-    DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
-    RpcServerArgs, TxPoolArgs,
+    utils::parse_socket_address, DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs,
+    PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
 };
 use clap::{value_parser, Args, Parser};
 use reth_cli_runner::CliContext;
@@ -32,7 +31,6 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     //     required = false,
     // )]
     // pub chain: Arc<ChainSpec>,
-
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
@@ -188,7 +186,9 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
+        // let database = Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
+        let database =
+            Arc::new(reth_db::open_db_read_only(&db_path.clone(), self.db.database_args())?);
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();

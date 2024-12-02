@@ -31,6 +31,10 @@ fn main() {
         let (provider_factory, bitfinity) =
             handle.bitfinity_import.clone().expect("Bitfinity import not configured");
 
+        if bitfinity.disable_auto_import {
+            return handle.node_exit_future.await;
+        }
+
         // Init bitfinity import
         {
             let import = BitfinityImportCommand::new(

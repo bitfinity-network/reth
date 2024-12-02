@@ -56,6 +56,10 @@ pub struct BitfinityImportArgs {
     /// Root key for the IC network
     #[arg(long, value_name = "IC_ROOT_KEY", default_value = IC_MAINNET_KEY)]
     pub ic_root_key: String,
+
+    /// Disable the automatic import of blocks
+    #[arg(long)]
+    pub disable_auto_import: bool,
 }
 
 /// Bitfinity Related Args
