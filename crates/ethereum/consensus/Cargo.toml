@@ -17,4 +17,11 @@ reth-consensus-common.workspace = true
 reth-primitives.workspace = true
 reth-consensus.workspace = true
 
+# bitfinity
+async-trait.workspace = true
+did.workspace = true
+evm-canister-client.workspace = true
+ic-agent.workspace = true
+ic-canister-client.workspace = true
+
 tracing.workspace = true

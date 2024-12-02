@@ -15,6 +15,7 @@ use reth_primitives::{
     B256, U256,
 };
 
+use core::future::Future;
 #[cfg(feature = "std")]
 use std::fmt::Debug;
 
@@ -48,7 +49,9 @@ impl<'a> PostExecutionInput<'a> {
 }
 
 /// Consensus is a protocol that chooses canonical chain.
-#[auto_impl::auto_impl(&, Arc)]
+//#[auto_impl::auto_impl(&, Arc)]
+#[async_trait::async_trait]
+#[auto_impl::auto_impl(Arc)]
 pub trait Consensus: Debug + Send + Sync {
     /// Validate if header is correct and follows consensus specification.
     ///
@@ -125,6 +128,24 @@ pub trait Consensus: Debug + Send + Sync {
         block: &BlockWithSenders,
         input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError>;
+
+    /// Confirm a block on the EVM.
+    ///
+    /// Used only for engines which communicates with the EVM to confirm blocks.
+    async fn confirm_block_on_evm(
+        &self,
+        _block: &BlockWithSenders,
+        _input: PostExecutionInput<'_>,
+    ) -> Result<(), ConsensusError> {
+        Ok(())
+    }
+
+    /// Reject a block on the EVM.
+    ///
+    /// Used only for engines which communicates with the EVM to confirm blocks.
+    async fn reject_block_on_evm(&self, _block: &SealedBlock) -> Result<(), ConsensusError> {
+        Ok(())
+    }
 }
 
 /// Consensus Errors

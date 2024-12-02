@@ -3,7 +3,7 @@
 use crate::{EthEngineTypes, EthEvmConfig};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_beacon_consensus::EthBeaconConsensus;
+use reth_beacon_consensus::{BitfinityBeaconConsensus, EthBeaconConsensus};
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
@@ -263,7 +263,29 @@ where
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
         if ctx.is_dev() {
             Ok(Arc::new(AutoSealConsensus::new(ctx.chain_spec())))
+        } else if ctx.config().bitfinity_import_arg.validate_block_ic_identity_file_path.is_some() {
+            tracing::info!("Using Bitfinity Beacon Consensus");
+            let evm_canister =
+                candid::Principal::from_text(&ctx.config().bitfinity_import_arg.evmc_principal)
+                    .expect("Failed to parse principal");
+            let ic_identity_path = ctx
+                .config()
+                .bitfinity_import_arg
+                .validate_block_ic_identity_file_path
+                .as_ref()
+                .unwrap();
+            let network = ctx.config().bitfinity_import_arg.evm_network.as_str();
+            Ok(Arc::new(
+                BitfinityBeaconConsensus::new(
+                    ctx.chain_spec(),
+                    evm_canister,
+                    &ic_identity_path,
+                    network,
+                )
+                .await,
+            ))
         } else {
+            tracing::info!("Using Ethereum Beacon Consensus");
             Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
         }
     }

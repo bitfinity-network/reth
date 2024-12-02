@@ -41,7 +41,7 @@ revm.workspace = true
 
 # common
 futures.workspace = true
-tokio = { workspace = true, features = ["macros", "sync"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 
 

@@ -1,15 +1,10 @@
-//! Beacon consensus implementation.
+mod block;
 
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
-    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
-    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
-)]
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-
-mod bitfinity;
-
+use block::BitfinityBlock;
+use did::{unsafe_blocks::ValidateUnsafeBlockArgs, H256};
+use evm_canister_client::EvmCanisterClient;
+use ic_agent::export::Principal;
+use ic_canister_client::IcAgentClient;
 use reth_chainspec::{Chain, ChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
@@ -19,79 +14,54 @@ use reth_consensus_common::validation::{
     validate_header_extradata, validate_header_gas,
 };
 use reth_primitives::{
-    constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Header, SealedBlock, SealedHeader,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    BlockWithSenders, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
-use std::{sync::Arc, time::SystemTime};
+use std::{
+    path::Path,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
-mod validation;
-pub use self::bitfinity::BitfinityBeaconConsensus;
-pub use validation::validate_block_post_execution;
+use super::validation::validate_block_post_execution;
 
 /// Ethereum beacon consensus
 ///
 /// This consensus engine does basic checks as outlined in the execution specs.
-#[derive(Debug)]
-pub struct EthBeaconConsensus {
+pub struct BitfinityBeaconConsensus {
     /// Configuration
     chain_spec: Arc<ChainSpec>,
+    evm_client: EvmCanisterClient<IcAgentClient>,
 }
 
-impl EthBeaconConsensus {
-    /// Create a new instance of [`EthBeaconConsensus`]
-    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec }
-    }
-
-    /// Checks the gas limit for consistency between parent and self headers.
-    ///
-    /// The maximum allowable difference between self and parent gas limits is determined by the
-    /// parent's gas limit divided by the elasticity multiplier (1024).
-    fn validate_against_parent_gas_limit(
-        &self,
-        header: &SealedHeader,
-        parent: &SealedHeader,
-    ) -> Result<(), ConsensusError> {
-        // Determine the parent gas limit, considering elasticity multiplier on the London fork.
-        let parent_gas_limit =
-            if self.chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number) {
-                parent.gas_limit
-                    * self
-                        .chain_spec
-                        .base_fee_params_at_timestamp(header.timestamp)
-                        .elasticity_multiplier as u64
-            } else {
-                parent.gas_limit
-            };
-
-        // Check for an increase in gas limit beyond the allowed threshold.
-        if header.gas_limit > parent_gas_limit {
-            if header.gas_limit - parent_gas_limit >= parent_gas_limit / 1024 {
-                return Err(ConsensusError::GasLimitInvalidIncrease {
-                    parent_gas_limit,
-                    child_gas_limit: header.gas_limit,
-                });
-            }
-        }
-        // Check for a decrease in gas limit beyond the allowed threshold.
-        else if parent_gas_limit - header.gas_limit >= parent_gas_limit / 1024 {
-            return Err(ConsensusError::GasLimitInvalidDecrease {
-                parent_gas_limit,
-                child_gas_limit: header.gas_limit,
-            });
-        }
-        // Check if the self gas limit is below the minimum required limit.
-        else if header.gas_limit < MINIMUM_GAS_LIMIT {
-            return Err(ConsensusError::GasLimitInvalidMinimum {
-                child_gas_limit: header.gas_limit,
-            });
-        }
-
-        Ok(())
+impl std::fmt::Debug for BitfinityBeaconConsensus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BitfinityBeaconConsensus").field("chain_spec", &self.chain_spec).finish()
     }
 }
 
-impl Consensus for EthBeaconConsensus {
+impl BitfinityBeaconConsensus {
+    /// Create a new instance of [`BitfinityBeaconConsensus`]
+    pub async fn new(
+        chain_spec: Arc<ChainSpec>,
+        evm_canister: Principal,
+        ic_identity_path: &Path,
+        network: &str,
+    ) -> Self {
+        let agent_client = IcAgentClient::with_identity(
+            evm_canister,
+            ic_identity_path,
+            network,
+            Some(Duration::from_secs(30)),
+        )
+        .await
+        .expect("Failed to create agent client");
+
+        Self { chain_spec, evm_client: EvmCanisterClient::new(agent_client) }
+    }
+}
+
+#[async_trait::async_trait]
+impl Consensus for BitfinityBeaconConsensus {
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
         validate_header_gas(header)?;
         validate_header_base_fee(header, &self.chain_spec)?;
@@ -226,98 +196,66 @@ impl Consensus for EthBeaconConsensus {
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec, input.receipts, input.requests)
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_chainspec::ChainSpecBuilder;
-    use reth_primitives::{proofs, B256};
+    /// Confirm a block on the EVM.
+    ///
+    /// Used only for engines which communicates with the EVM to confirm blocks.
+    async fn confirm_block_on_evm(
+        &self,
+        block: &BlockWithSenders,
+        input: PostExecutionInput<'_>,
+    ) -> Result<(), ConsensusError> {
+        let block = BitfinityBlock::from(block);
 
-    fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
-        let header = Header { gas_limit, ..Default::default() };
-        header.seal(B256::ZERO)
-    }
-
-    #[test]
-    fn test_valid_gas_limit_increase() {
-        let parent = header_with_gas_limit(1024 * 10);
-        let child = header_with_gas_limit(parent.gas_limit + 5);
-
-        assert_eq!(
-            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
-                .validate_against_parent_gas_limit(&child, &parent),
-            Ok(())
-        );
-    }
-
-    #[test]
-    fn test_gas_limit_below_minimum() {
-        let parent = header_with_gas_limit(MINIMUM_GAS_LIMIT);
-        let child = header_with_gas_limit(MINIMUM_GAS_LIMIT - 1);
-
-        assert_eq!(
-            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
-                .validate_against_parent_gas_limit(&child, &parent),
-            Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit })
-        );
-    }
-
-    #[test]
-    fn test_invalid_gas_limit_increase_exceeding_limit() {
-        let parent = header_with_gas_limit(1024 * 10);
-        let child = header_with_gas_limit(parent.gas_limit + parent.gas_limit / 1024 + 1);
-
-        assert_eq!(
-            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
-                .validate_against_parent_gas_limit(&child, &parent),
-            Err(ConsensusError::GasLimitInvalidIncrease {
-                parent_gas_limit: parent.gas_limit,
-                child_gas_limit: child.gas_limit,
+        let res = self
+            .evm_client
+            .validate_unsafe_block(ValidateUnsafeBlockArgs {
+                block_number: block.number(),
+                block_hash: block.hash(),
+                state_root: block.state_root(),
+                transactions_root: block.transaction_root(),
+                receipts_root: block.receipts_root(&input.receipts),
             })
+            .await
+            .map_err(|_| ConsensusError::RequestsRootUnexpected)?;
+
+        tracing::info!(
+            "Validate unsafe block response for block {} (confirm): {res:?}",
+            block.number()
         );
-    }
 
-    #[test]
-    fn test_valid_gas_limit_decrease_within_limit() {
-        let parent = header_with_gas_limit(1024 * 10);
-        let child = header_with_gas_limit(parent.gas_limit - 5);
-
-        assert_eq!(
-            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
-                .validate_against_parent_gas_limit(&child, &parent),
-            Ok(())
-        );
-    }
-
-    #[test]
-    fn test_invalid_gas_limit_decrease_exceeding_limit() {
-        let parent = header_with_gas_limit(1024 * 10);
-        let child = header_with_gas_limit(parent.gas_limit - parent.gas_limit / 1024 - 1);
-
-        assert_eq!(
-            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
-                .validate_against_parent_gas_limit(&child, &parent),
-            Err(ConsensusError::GasLimitInvalidDecrease {
-                parent_gas_limit: parent.gas_limit,
-                child_gas_limit: child.gas_limit,
-            })
-        );
-    }
-
-    #[test]
-    fn shanghai_block_zero_withdrawals() {
-        // ensures that if shanghai is activated, and we include a block with a withdrawals root,
-        // that the header is valid
-        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
-
-        let header = Header {
-            base_fee_per_gas: Some(1337u64),
-            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
-            ..Default::default()
+        if let Err(err) = res {
+            tracing::error!("Failed to validate unsafe block: {err:?}");
+            return Err(ConsensusError::RequestsRootUnexpected);
         }
-        .seal_slow();
 
-        assert_eq!(EthBeaconConsensus::new(chain_spec).validate_header(&header), Ok(()));
+        Ok(())
+    }
+
+    /// Reject a block on the EVM, by sending an invalid block to the EVM.
+    async fn reject_block_on_evm(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
+        // we expect error here
+        let res = self
+            .evm_client
+            .validate_unsafe_block(ValidateUnsafeBlockArgs {
+                block_number: block.number,
+                block_hash: H256::zero(),
+                state_root: H256::zero(),
+                transactions_root: H256::zero(),
+                receipts_root: H256::zero(),
+            })
+            .await
+            .map_err(|_| ConsensusError::RequestsRootUnexpected)?;
+
+        if res.is_ok() {
+            return Err(ConsensusError::RequestsRootUnexpected);
+        }
+
+        tracing::info!(
+            "Validate unsafe block response for block {} (reject): {res:?}",
+            block.number
+        );
+
+        Ok(())
     }
 }

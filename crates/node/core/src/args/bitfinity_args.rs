@@ -56,6 +56,20 @@ pub struct BitfinityImportArgs {
     /// Root key for the IC network
     #[arg(long, value_name = "IC_ROOT_KEY", default_value = IC_MAINNET_KEY)]
     pub ic_root_key: String,
+
+    /// Path to an identity PEM file to use to validate blocks when running the node.
+    ///
+    /// If not provided blocks will not be validated.
+    #[arg(long, value_name = "IDENTITY_FILE_PATH")]
+    pub validate_block_ic_identity_file_path: Option<std::path::PathBuf>,
+
+    /// Network url
+    /// This is the URL of the IC network.
+    /// E.g.
+    /// - https://ic0.app
+    /// - http://127.0.0.1:3333
+    #[arg(long, default_value = "ic")]
+    pub evm_network: String,
 }
 
 /// Bitfinity Related Args
