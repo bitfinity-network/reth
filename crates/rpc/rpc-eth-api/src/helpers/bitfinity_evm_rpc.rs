@@ -4,12 +4,13 @@ use std::sync::Arc;
 
 use alloy_rlp::Decodable;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
-use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
+use ethereum_json_rpc_client::{Block, CertifiedResult, Id, Params, H256};
 use futures::Future;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
 use reth_primitives::TransactionSigned;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
+use reth_rpc_types::{Signature, Transaction};
 use revm_primitives::{Address, Bytes, B256, U256};
 
 use crate::RawTransactionForwarder;
@@ -38,6 +39,43 @@ pub trait BitfinityEvmRpc {
             })?;
 
             Ok(U256::from(gas_price.as_u128()))
+        }
+    }
+
+    /// Returns transaction from forwarder or query it from EVM RPC.
+    fn transaction_by_hash(
+        &self,
+        hash: B256,
+    ) -> impl Future<Output = RpcResult<Option<Transaction>>> + Send {
+        let chain_spec = self.chain_spec();
+        let forwarder = self.raw_tx_forwarder();
+
+        async move {
+            if let Some(forwarder) = forwarder {
+                let tx_opt = get_transaction_from_forwarder(&*forwarder, hash).await?;
+                if tx_opt.is_some() {
+                    return Ok(tx_opt);
+                }
+            };
+
+            // If transaction not found in forwarder, query it from EVM rpc.
+            let (rpc_url, client) = get_client(&chain_spec)?;
+            let method = "eth_getTransactionByHash".to_string();
+            let tx: Option<Transaction> = client
+                .single_request(
+                    method.clone(),
+                    Params::Array(vec![hash.to_string().into()]),
+                    Id::Str(method),
+                )
+                .await
+                .map_err(|e| {
+                    internal_rpc_err(format!(
+                        "failed to forward eth_getTransactionByHash request to {}: {}",
+                        rpc_url, e
+                    ))
+                })?;
+
+            Ok(tx)
         }
     }
 
@@ -141,4 +179,46 @@ fn get_client(chain_spec: &ChainSpec) -> RpcResult<(&String, EthJsonRpcClient<Re
     );
 
     Ok((rpc_url, client))
+}
+
+async fn get_transaction_from_forwarder(
+    forwarder: &dyn RawTransactionForwarder,
+    hash: B256,
+) -> RpcResult<Option<Transaction>> {
+    let Some(raw) = forwarder.get_transaction_by_hash(hash).await else { return Ok(None) };
+    let typed_tx = TransactionSigned::decode(&mut &raw[..])
+        .map_err(|e| internal_rpc_err(format!("failed to decode transaction from bytes: {e}")))?;
+
+    let Some(from) = typed_tx.recover_signer() else {
+        return Err(internal_rpc_err("Failed to recover signer from raw transaction"));
+    };
+
+    let sig = typed_tx.signature;
+    let signature =
+        Signature { r: sig.r, s: sig.s, v: U256::from(sig.v(typed_tx.chain_id())), y_parity: None };
+
+    let tx = Transaction {
+        hash,
+        nonce: typed_tx.nonce(),
+        block_hash: None,
+        block_number: None,
+        transaction_index: None,
+        from,
+        to: typed_tx.to(),
+        value: typed_tx.value(),
+        gas_price: Some(typed_tx.effective_gas_price(None)),
+        gas: typed_tx.gas_limit() as _,
+        max_fee_per_gas: Some(typed_tx.max_fee_per_gas()),
+        max_priority_fee_per_gas: typed_tx.max_priority_fee_per_gas(),
+        max_fee_per_blob_gas: typed_tx.max_fee_per_blob_gas(),
+        input: typed_tx.input().clone(),
+        signature: Some(signature),
+        chain_id: typed_tx.chain_id(),
+        blob_versioned_hashes: typed_tx.blob_versioned_hashes(),
+        access_list: typed_tx.access_list().cloned(),
+        transaction_type: Some(typed_tx.transaction.tx_type().into()),
+        other: Default::default(),
+    };
+
+    Ok(Some(tx))
 }

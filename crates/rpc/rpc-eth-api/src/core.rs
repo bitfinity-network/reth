@@ -469,7 +469,14 @@ where
     /// Handler for: `eth_getTransactionByHash`
     async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
-        Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
+        // Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
+
+        let mut tx_opt =
+            EthTransactions::transaction_by_hash(self, hash).await?.map(Transaction::from);
+        if tx_opt.is_none() {
+            tx_opt = BitfinityEvmRpc::transaction_by_hash(self, hash).await?;
+        }
+        Ok(tx_opt)
     }
 
     /// Handler for: `eth_getRawTransactionByBlockHashAndIndex`
