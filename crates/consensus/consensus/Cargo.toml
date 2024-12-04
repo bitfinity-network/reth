@@ -16,10 +16,7 @@ reth-primitives.workspace = true
 
 # misc
 auto_impl.workspace = true
-thiserror-no-std = { workspace = true, default-features = false }
-
-# bitfinity
-async-trait.workspace = true
+thiserror-no-std = {workspace = true, default-features = false }
 
 [features]
 default = ["std"]
