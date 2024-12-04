@@ -12,7 +12,8 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use reth::bitfinity_tasks::send_txs::{
-    BitfinityTransactionSender, BitfinityTransactionsForwarder, TransactionsPriorityQueue,
+    BitfinityTransactionSender, BitfinityTransactionsForwarder, SharedQueue,
+    TransactionsPriorityQueue,
 };
 use reth::{
     args::{DatadirArgs, RpcServerArgs},
@@ -35,7 +36,7 @@ use tokio::sync::Mutex;
 async fn bitfinity_test_should_start_local_reth_node() {
     // Arrange
     let _log = init_logs();
-    let (reth_client, _reth_node) = start_reth_node(None, None).await;
+    let (reth_client, _reth_node) = start_reth_node(None, None, None).await;
 
     // Act & Assert
     assert!(reth_client.get_chain_id().await.is_ok());
@@ -50,7 +51,7 @@ async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None, None).await;
 
     // Act
     let result = reth_client.get_last_certified_block().await;
@@ -81,7 +82,7 @@ async fn bitfinity_test_node_forward_get_gas_price_requests() {
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None, None).await;
 
     // Act
     let gas_price_result = reth_client.gas_price().await;
@@ -100,7 +101,7 @@ async fn bitfinity_test_node_forward_max_priority_fee_per_gas_requests() {
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None, None).await;
 
     // Act
     let result = reth_client.max_priority_fee_per_gas().await;
@@ -118,7 +119,7 @@ async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None, None).await;
 
     // Act
     let result: Vec<(ethereum_json_rpc_client::H160, ethereum_json_rpc_client::U256)> = reth_client
@@ -152,7 +153,7 @@ async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None, None).await;
 
     // Act
     let result = reth_client.get_genesis_balances().await.unwrap();
@@ -178,10 +179,14 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     let (tx_sender, mut tx_receiver) = tokio::sync::mpsc::channel(10);
     let eth_server = EthImpl::new(Some(tx_sender));
 
+    let queue = Arc::new(Mutex::new(TransactionsPriorityQueue::new(10)));
+
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let bitfinity_evm_url = format!("http://{}", eth_server_address);
     let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None, Some(queue.clone()))
+            .await;
 
     // Create a random transaction
     let tx = transaction_with_gas_price(100);
@@ -193,6 +198,15 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
 
     // Assert
     assert_eq!(result.to_fixed_bytes(), expected_tx_hash.0.to_fixed_bytes());
+
+    let transaction_sending = BitfinityTransactionSender::new(
+        queue,
+        bitfinity_evm_url,
+        Duration::from_millis(200),
+        10,
+        100,
+    );
+    transaction_sending.single_execution().await.unwrap();
 
     let received_txs = consume_received_txs(&mut tx_receiver, 1).await.unwrap();
 
@@ -207,10 +221,13 @@ async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
     let (tx_sender, mut tx_receiver) = tokio::sync::mpsc::channel(10);
     let eth_server = EthImpl::new(Some(tx_sender));
 
+    let queue = Arc::new(Mutex::new(TransactionsPriorityQueue::new(10)));
+
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let bitfinity_evm_url = format!("http://{}", eth_server_address);
     let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+        start_reth_node(Some(bitfinity_evm_url.clone()), None, Some(queue.clone())).await;
 
     const TXS_NUMBER: usize = 10;
 
@@ -226,6 +243,15 @@ async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
         let hash = reth_client.send_raw_transaction_bytes(tx).await.unwrap();
         assert_eq!(hash.to_fixed_bytes(), expected_hash.0.to_fixed_bytes());
     }
+
+    let transaction_sending = BitfinityTransactionSender::new(
+        queue,
+        bitfinity_evm_url,
+        Duration::from_millis(200),
+        10,
+        100,
+    );
+    transaction_sending.single_execution().await.unwrap();
 
     let received_txs = consume_received_txs(&mut tx_receiver, 10).await.unwrap();
 
@@ -261,6 +287,7 @@ fn transaction_with_gas_price(gas_price: u128) -> TransactionSigned {
 async fn start_reth_node(
     bitfinity_evm_url: Option<String>,
     import_data: Option<ImportData>,
+    queue: Option<SharedQueue>,
 ) -> (
     EthJsonRpcClient<ReqwestClient>,
     NodeHandle<
@@ -326,15 +353,13 @@ async fn start_reth_node(
         Arc::new(init_db(data_dir.db(), Default::default()).unwrap())
     };
 
-    let queue = Arc::new(Mutex::new(TransactionsPriorityQueue::new(1000)));
-    let queue_clone = Arc::clone(&queue);
-
     let node_handle = NodeBuilder::new(node_config)
         .with_database(database)
         .with_launch_context(tasks.executor())
         .node(EthereumNode::default())
         .extend_rpc_modules(|ctx| {
             // Add custom forwarder with transactions priority queue.
+            let Some(queue) = queue else { return Ok(()) };
             let forwarder = BitfinityTransactionsForwarder::new(queue);
             ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(forwarder));
 
@@ -343,15 +368,6 @@ async fn start_reth_node(
         .launch()
         .await
         .unwrap();
-
-    let transaction_sending = BitfinityTransactionSender::new(
-        queue_clone,
-        bitfinity_evm_url.unwrap_or_default(),
-        Duration::from_millis(200),
-        10,
-        100,
-    );
-    let _sending_handle = transaction_sending.schedule_execution(None).await.unwrap();
 
     let reth_address = node_handle.node.rpc_server_handle().http_local_addr().unwrap();
     let addr_string = format!("http://{}", reth_address);
@@ -376,6 +392,7 @@ async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle, So
     (handle, server_address)
 }
 
+/// Eth server mock utils.
 pub mod eth_server {
     use alloy_rlp::{Bytes, Decodable};
     use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
@@ -386,30 +403,42 @@ pub mod eth_server {
 
     #[rpc(server, namespace = "eth")]
     pub trait Eth {
+        /// Returns gasPrice
         #[method(name = "gasPrice")]
         async fn gas_price(&self) -> RpcResult<U256>;
 
+        /// Returns maxPriorityFeePerGas
         #[method(name = "maxPriorityFeePerGas")]
         async fn max_priority_fee_per_gas(&self) -> RpcResult<U256>;
 
+        /// Returns sendRawTransaction
         #[method(name = "sendRawTransaction")]
         async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256>;
 
+        /// Returns getGenesisBalances
         #[method(name = "getGenesisBalances", aliases = ["ic_getGenesisBalances"])]
         async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>>;
 
+        /// Returns getLastCertifiedBlock
         #[method(name = "getLastCertifiedBlock", aliases = ["ic_getLastCertifiedBlock"])]
         async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>>;
     }
 
+    /// Eth server mock.
     #[derive(Debug)]
     pub struct EthImpl {
+        /// Current gas price
         pub gas_price: u128,
+
+        /// Current `max_priority_fee_per_gas`
         pub max_priority_fee_per_gas: u128,
+
+        /// The mock will send transactions to the sender, if present.
         pub txs_sender: Option<Sender<B256>>,
     }
 
     impl EthImpl {
+        /// New mock instance.
         pub fn new(txs_sender: Option<Sender<B256>>) -> Self {
             Self { gas_price: rand::random(), max_priority_fee_per_gas: rand::random(), txs_sender }
         }

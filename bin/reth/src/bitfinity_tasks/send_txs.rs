@@ -78,7 +78,7 @@ impl BitfinityTransactionSender {
     }
 
     /// Execute the transaction sending job.
-    async fn single_execution(&self) -> eyre::Result<()> {
+    pub async fn single_execution(&self) -> eyre::Result<()> {
         let mut total_sent = 0;
         loop {
             let to_send = self.get_transactions_to_send().await;
