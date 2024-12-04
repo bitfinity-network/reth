@@ -1,5 +1,6 @@
 //! Abstraction for launching a node.
 
+use crate::ExExLauncher;
 use crate::{
     builder::{NodeAdapter, NodeAddOns, NodeTypesAdapter},
     components::{NodeComponents, NodeComponentsBuilder},
@@ -34,12 +35,7 @@ use std::{future::Future, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-mod bitfinity_common;
-pub mod common;
-pub mod bitfinity_launch;
-pub use common::LaunchContext;
-mod exex;
-pub use exex::ExExLauncher;
+use super::LaunchContext;
 
 /// A general purpose trait that launches a new node of any kind.
 ///
@@ -48,48 +44,48 @@ pub use exex::ExExLauncher;
 /// This is essentially the launch logic for a node.
 ///
 /// See also [`DefaultNodeLauncher`] and [`NodeBuilderWithComponents::launch_with`]
-pub trait LaunchNode<Target> {
+pub trait ReadOnlyLaunchNode<Target> {
     /// The node type that is created.
     type Node;
 
     /// Create and return a new node asynchronously.
-    fn launch_node(self, target: Target) -> impl Future<Output = eyre::Result<Self::Node>> + Send;
+    fn launch_readonly_node(self, target: Target) -> impl Future<Output = eyre::Result<Self::Node>> + Send;
 }
 
-impl<F, Target, Fut, Node> LaunchNode<Target> for F
+impl<F, Target, Fut, Node> ReadOnlyLaunchNode<Target> for F
 where
     F: FnOnce(Target) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Node>> + Send,
 {
     type Node = Node;
 
-    fn launch_node(self, target: Target) -> impl Future<Output = eyre::Result<Self::Node>> + Send {
+    fn launch_readonly_node(self, target: Target) -> impl Future<Output = eyre::Result<Self::Node>> + Send {
         self(target)
     }
 }
 
 /// The default launcher for a node.
 #[derive(Debug)]
-pub struct DefaultNodeLauncher {
+pub struct DefaultReadOnlyNodeLauncher {
     /// The task executor for the node.
     pub ctx: LaunchContext,
 }
 
-impl DefaultNodeLauncher {
+impl DefaultReadOnlyNodeLauncher {
     /// Create a new instance of the default node launcher.
     pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
         Self { ctx: LaunchContext::new(task_executor, data_dir) }
     }
 }
 
-impl<T, CB> LaunchNode<NodeBuilderWithComponents<T, CB>> for DefaultNodeLauncher
+impl<T, CB> ReadOnlyLaunchNode<NodeBuilderWithComponents<T, CB>> for DefaultReadOnlyNodeLauncher
 where
     T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
     CB: NodeComponentsBuilder<T>,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>>;
 
-    async fn launch_node(
+    async fn launch_readonly_node(
         self,
         target: NodeBuilderWithComponents<T, CB>,
     ) -> eyre::Result<Self::Node> {
@@ -113,9 +109,9 @@ where
             .attach(database.clone())
             // ensure certain settings take effect
             .with_adjusted_configs()
-            .with_provider_factory().await?
+            .with_readonly_provider_factory().await?
             .inspect(|_| {
-                info!(target: "reth::cli", "Database opened");
+                info!(target: "reth::cli", "Readonly Provider Factory opened");
             })
             .with_prometheus().await?
             .inspect(|this| {
@@ -395,7 +391,11 @@ where
                 full_node.config.debug.terminate,
             ),
             node: full_node,
-            bitfinity_import: Some((ctx.provider_factory().clone(), ctx.node_config().bitfinity_import_arg.clone()))};
+            bitfinity_import: Some((
+                ctx.provider_factory().clone(),
+                ctx.node_config().bitfinity_import_arg.clone(),
+            )),
+        };
 
         Ok(handle)
     }

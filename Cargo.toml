@@ -137,6 +137,9 @@ members = [
     "examples/exex/op-bridge/",
     "testing/ef-tests/",
     "testing/testing-utils",
+
+    # bitfinity
+    "bin/reth/src/bitfinity_readonly.rs",
 ]
 default-members = ["bin/reth"]
 

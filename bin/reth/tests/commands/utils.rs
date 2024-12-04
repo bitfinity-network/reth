@@ -153,7 +153,7 @@ pub async fn bitfinity_import_config_data(
         backup_rpc_url: backup_evm_datasource_url,
         max_retries: 3,
         retry_delay_secs: 3,
-        disable_auto_import: false,
+        readonly: false,
     };
 
     Ok((

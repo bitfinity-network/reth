@@ -41,6 +41,7 @@ pub use states::*;
 use std::sync::Arc;
 
 mod states;
+pub mod bitfinity_builder;
 
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.

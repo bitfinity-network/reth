@@ -9,6 +9,10 @@ repository.workspace = true
 description = "Reth node implementation"
 default-run = "reth"
 
+[[bin]]
+name = "reth-readonly"
+path = "src/bitfinity_readonly.rs"
+
 [lints]
 workspace = true
 

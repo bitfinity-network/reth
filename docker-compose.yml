@@ -10,4 +10,4 @@ services:
       - '8080:8080'
     command: node -vvv --http --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth,net,trace,txpool,web3" --disable-discovery --ipcdisable --no-persist-peers -r https://orca-app-5yyst.ondigitalocean.app -i 10 -b 100 --datadir /reth/data
     volumes:
-      - ./target/reth:/reth
+      - ./target/reth:/reth:ro

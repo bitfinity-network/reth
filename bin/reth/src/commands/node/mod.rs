@@ -186,9 +186,11 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        // let database = Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
-        let database =
-            Arc::new(reth_db::open_db_read_only(&db_path.clone(), self.db.database_args())?);
+        let database = if node_config.bitfinity_import_arg.readonly {
+            Arc::new(reth_db::open_db_read_only(&db_path.clone(), self.db.database_args())?)
+        } else {
+            Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics())
+        };
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();
