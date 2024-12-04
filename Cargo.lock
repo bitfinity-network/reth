@@ -2620,8 +2620,8 @@ dependencies = [
 
 [[package]]
 name = "did"
-version = "0.36.1"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1086-block-validation-with-a-single-reth-node#7342f0f65ca84e805aa286b3827cbae66808abb6"
+version = "0.36.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1086-block-validation-with-a-single-reth-node#33905d2d6ba1587b9ef13639a329625a8ef8349b"
 dependencies = [
  "alloy-primitives",
  "bincode",
@@ -3003,8 +3003,8 @@ dependencies = [
 
 [[package]]
 name = "ethereum-json-rpc-client"
-version = "0.36.1"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1086-block-validation-with-a-single-reth-node#7342f0f65ca84e805aa286b3827cbae66808abb6"
+version = "0.36.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1086-block-validation-with-a-single-reth-node#33905d2d6ba1587b9ef13639a329625a8ef8349b"
 dependencies = [
  "anyhow",
  "candid",
@@ -3104,8 +3104,8 @@ dependencies = [
 
 [[package]]
 name = "evm-canister-client"
-version = "0.36.1"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1086-block-validation-with-a-single-reth-node#7342f0f65ca84e805aa286b3827cbae66808abb6"
+version = "0.36.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?branch=EPROD-1086-block-validation-with-a-single-reth-node#33905d2d6ba1587b9ef13639a329625a8ef8349b"
 dependencies = [
  "candid",
  "did",

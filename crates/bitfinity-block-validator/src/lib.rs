@@ -45,10 +45,21 @@ where
         block: Block,
         transactions: &[Transaction],
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.unsafe_blocks_enabled().await? {
+            tracing::debug!("Unsafe blocks are disabled");
+            return Ok(());
+        }
         let validate_args = self.execute_block(block, transactions)?;
         self.validate_unsafe_block(validate_args).await?;
 
         Ok(())
+    }
+
+    /// Get whether unsafe blocks are enabled.
+    async fn unsafe_blocks_enabled(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        let res = self.evm_client.is_unsafe_blocks_enabled().await?;
+
+        Ok(res)
     }
 
     /// Execute block and return validation arguments.
