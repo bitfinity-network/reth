@@ -6,12 +6,12 @@ use evm_canister_client::{CanisterClient, EvmCanisterClient};
 use itertools::Itertools;
 use reth_db::database::Database;
 use reth_engine_tree::tree::MemoryOverlayStateProvider;
-use reth_evm::execute::BlockExecutorProvider as _;
 use reth_evm::execute::Executor as _;
+use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider as _};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_evm_ethereum::{execute::EthBlockExecutor, EthEvmConfig};
-use reth_primitives::Address;
 use reth_primitives::U256;
+use reth_primitives::{Address, Receipt};
 use reth_primitives::{Block, BlockWithSenders};
 use reth_provider::{ChainSpecProvider as _, ExecutionOutcome, ProviderFactory, StateProvider};
 use reth_revm::database::StateProviderDatabase;
@@ -57,9 +57,10 @@ where
 
     /// Get whether unsafe blocks are enabled.
     async fn unsafe_blocks_enabled(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        let res = self.evm_client.is_unsafe_blocks_enabled().await?;
-
-        Ok(res)
+        self.evm_client
+            .is_unsafe_blocks_enabled()
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)
     }
 
     /// Execute block and return validation arguments.
@@ -89,40 +90,19 @@ where
         };
 
         // calculate the receipts root
-        let receipts_with_bloom =
-            output.receipts.iter().map(|receipt| receipt.clone().with_bloom()).collect::<Vec<_>>();
-        let calculated_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
-        let receipts_root = H256::from_slice(calculated_root.as_ref());
+        let receipts_root = self.calculate_receipts_root(&output.receipts);
         tracing::debug!("Block {block_number} receipts root: {receipts_root}",);
 
         // calculate trasnsactions_root
-        let calculated_root =
-            reth_primitives::proofs::calculate_transaction_root(&block_with_senders.body);
-        let transactions_root = H256::from_slice(calculated_root.as_ref());
+        let transactions_root = self.calculate_transactions_root(&block_with_senders);
         tracing::debug!("Block {block_number} transactions root: {transactions_root}",);
 
         // calculate block hash
-        let calculated_block_hash = block_with_senders.clone().seal_slow().hash();
-        let block_hash = H256::from_slice(calculated_block_hash.as_ref());
+        let block_hash = self.calculate_block_hash(&block_with_senders);
         tracing::debug!("Block {block_number} hash: {block_hash}",);
 
-        // get state root
-        let execution_outcome = ExecutionOutcome::new(
-            output.state,
-            output.receipts.into(),
-            block_number,
-            vec![output.requests.into()],
-        );
-        let provider = match self.provider_factory.provider() {
-            Ok(provider) => provider,
-            Err(err) => {
-                tracing::error!("Failed to get provider: {err:?}");
-                return Err(Box::new(err));
-            }
-        };
-        let calculated_state_root =
-            execution_outcome.hash_state_slow().state_root_with_updates(provider.tx_ref())?.0;
-        let state_root = H256::from_slice(calculated_state_root.as_ref());
+        // calculate state root
+        let state_root = self.calculate_state_root(output, block_number)?;
         tracing::debug!("Block {block_number} state root: {state_root}",);
 
         Ok(ValidateUnsafeBlockArgs {
@@ -134,12 +114,57 @@ where
         })
     }
 
+    /// Calculate the receipts root.
+    fn calculate_receipts_root(&self, receipts: &[reth_primitives::Receipt]) -> H256 {
+        let receipts_with_bloom =
+            receipts.iter().map(|receipt| receipt.clone().with_bloom()).collect::<Vec<_>>();
+        let calculated_root = reth_primitives::proofs::calculate_receipt_root(&receipts_with_bloom);
+        H256::from_slice(calculated_root.as_ref())
+    }
+
+    /// Calculate the transactions root.
+    fn calculate_transactions_root(&self, block: &BlockWithSenders) -> H256 {
+        let calculated_root = reth_primitives::proofs::calculate_transaction_root(&block.body);
+        H256::from_slice(calculated_root.as_ref())
+    }
+
+    /// Calculate the block hash.
+    fn calculate_block_hash(&self, block: &BlockWithSenders) -> H256 {
+        let calculated_hash = block.clone().seal_slow().hash();
+        H256::from_slice(calculated_hash.as_ref())
+    }
+
+    /// Calculate the state root.
+    fn calculate_state_root(
+        &self,
+        execution_output: BlockExecutionOutput<Receipt>,
+        block_number: u64,
+    ) -> Result<H256, Box<dyn std::error::Error>> {
+        // get state root
+        let execution_outcome = ExecutionOutcome::new(
+            execution_output.state,
+            execution_output.receipts.into(),
+            block_number,
+            vec![execution_output.requests.into()],
+        );
+        let provider = match self.provider_factory.provider() {
+            Ok(provider) => provider,
+            Err(err) => {
+                tracing::error!("Failed to get provider: {err:?}");
+                return Err(Box::new(err));
+            }
+        };
+        let calculated_state_root =
+            execution_outcome.hash_state_slow().state_root_with_updates(provider.tx_ref())?.0;
+
+        Ok(H256::from_slice(calculated_state_root.as_ref()))
+    }
+
     /// Convert [`Block`] to [`BlockWithSenders`].
     fn convert_block(block: Block, transactions: &[Transaction]) -> BlockWithSenders {
         let senders = transactions
             .iter()
-            .map(|tx| &tx.from)
-            .map(|from| Address::from_slice(from.0.as_ref()))
+            .map(|tx| Address::from_slice(tx.from.0.as_ref()))
             .unique()
             .collect::<Vec<_>>();
         tracing::debug!("Found {} unique senders in block", senders.len());
