@@ -1,6 +1,8 @@
 //! Command that initializes the node by importing a chain from a remote EVM node.
 
 use crate::{dirs::DataDirPath, macros::block_executor, version::SHORT_VERSION};
+use bitfinity_block_validator::BitfinityBlockValidator;
+use evm_canister_client::{EvmCanisterClient, IcAgentClient};
 use futures::{Stream, StreamExt};
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -125,6 +127,28 @@ impl BitfinityImportCommand {
 
     /// Execute the import job.
     async fn single_execution(&self) -> eyre::Result<()> {
+        let evmc_principal = candid::Principal::from_text(&self.bitfinity.evmc_principal)
+            .expect("Failed to parse principal");
+
+        // make block validation client if identity path is set
+        let evm_block_validator =
+            if let Some(identity) = self.bitfinity.validate_block_ic_identity_file_path.as_ref() {
+                let evm_client = EvmCanisterClient::new(
+                    IcAgentClient::with_identity(
+                        evmc_principal,
+                        identity,
+                        &self.bitfinity.evm_network,
+                        Some(Duration::from_secs(30)),
+                    )
+                    .await
+                    .expect("Failed to create agent client"),
+                );
+
+                Some(BitfinityBlockValidator::new(evm_client, self.provider_factory.clone()))
+            } else {
+                None
+            };
+
         let consensus = Arc::new(EthBeaconConsensus::new(self.chain.clone()));
         debug!(target: "reth::cli - BitfinityImportCommand", "Consensus engine initialized");
         let provider_factory = self.provider_factory.clone();
@@ -139,6 +163,27 @@ impl BitfinityImportCommand {
             backup_url: self.bitfinity.backup_rpc_url.clone(),
             max_retries: self.bitfinity.max_retries,
             retry_delay: Duration::from_secs(self.bitfinity.retry_delay_secs),
+            evm_block_validator,
+        };
+
+        let ic_root_key = if self.bitfinity.fetch_ic_root_key {
+            let ic_identity_path = self
+                .bitfinity
+                .validate_block_ic_identity_file_path
+                .as_ref()
+                .expect("identity path not set");
+            let agent = evm_canister_client::agent::identity::init_agent(
+                &ic_identity_path,
+                &self.bitfinity.evm_network,
+                None,
+            )
+            .await?;
+
+            agent.fetch_root_key().await.expect("failed to fetch IC root key");
+            let root_key = agent.read_root_key();
+            hex::encode(root_key)
+        } else {
+            self.bitfinity.ic_root_key.clone()
         };
 
         let remote_client = Arc::new(
@@ -150,7 +195,7 @@ impl BitfinityImportCommand {
                 self.bitfinity.max_fetch_blocks,
                 Some(CertificateCheckSettings {
                     evmc_principal: self.bitfinity.evmc_principal.clone(),
-                    ic_root_key: self.bitfinity.ic_root_key.clone(),
+                    ic_root_key,
                 }),
             )
             .await?,

@@ -1,7 +1,9 @@
+use bitfinity_block_validator::BitfinityBlockValidator;
 use candid::Principal;
 use did::certified::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use eyre::Result;
+use ic_canister_client::IcAgentClient;
 use ic_cbor::{CertificateToCbor, HashTreeToCbor};
 use ic_certificate_verification::VerifyCertificate;
 use ic_certification::{Certificate, HashTree, LookupResult};
@@ -12,6 +14,7 @@ use reth_chainspec::{
 };
 
 use alloy_rlp::Decodable;
+use reth_db::DatabaseEnv;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
@@ -27,8 +30,8 @@ use reth_primitives::{
 use rlp::Encodable;
 use serde_json::json;
 
-use std::time::Duration;
 use std::{self, cmp::min, collections::HashMap};
+use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 
 use backon::{ExponentialBuilder, Retryable};
@@ -36,7 +39,7 @@ use backon::{ExponentialBuilder, Retryable};
 use tracing::{debug, error, info, trace, warn};
 
 /// RPC client configuration
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct RpcClientConfig {
     /// Primary RPC URL
     pub primary_url: String,
@@ -46,6 +49,19 @@ pub struct RpcClientConfig {
     pub max_retries: u32,
     /// Delay between retries
     pub retry_delay: Duration,
+    /// Block validation client
+    pub evm_block_validator: Option<BitfinityBlockValidator<IcAgentClient, Arc<DatabaseEnv>>>,
+}
+
+impl std::fmt::Debug for RpcClientConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RpcClientConfig")
+            .field("primary_url", &self.primary_url)
+            .field("backup_url", &self.backup_url)
+            .field("max_retries", &self.max_retries)
+            .field("retry_delay", &self.retry_delay)
+            .finish()
+    }
 }
 
 /// Front-end API for fetching chain data from remote sources.
@@ -78,6 +94,10 @@ pub enum RemoteClientError {
     /// Certificate check error
     #[error("certification check error: {0}")]
     CertificateError(String),
+
+    /// Error occurred when validating blocks on the evm
+    #[error("EVM block validation error: {0}")]
+    BlockValidationError(String),
 }
 
 /// Setting for checking last certified block
@@ -102,6 +122,8 @@ impl BitfinityEvmClient {
         let mut headers = HashMap::new();
         let mut hash_to_number = HashMap::new();
         let mut bodies = HashMap::new();
+
+        let evm_block_validator = rpc_config.evm_block_validator.clone();
 
         let provider = Self::client(rpc_config)
             .await
@@ -152,11 +174,15 @@ impl BitfinityEvmClient {
             trace!(target: "downloaders::bitfinity_evm_client", blocks = full_blocks.len(), "Fetched blocks");
 
             for block in full_blocks {
-                if let Some(block_checker) = &block_checker {
-                    block_checker.check_block(&block)?;
-                }
                 let header =
                     reth_primitives::Block::decode(&mut block.rlp_bytes().to_vec().as_slice())?;
+                if let Some(block_checker) = &block_checker {
+                    debug!("Checking block {}", block.number);
+                    block_checker
+                        .check_block(&block, &header, evm_block_validator.as_ref())
+                        .await?;
+                    debug!("block {} OK", block.number);
+                }
 
                 let block_hash = header.hash_slow();
 
@@ -427,7 +453,12 @@ impl BlockCertificateChecker {
         self.certified_data.data.number.0.as_u64()
     }
 
-    fn check_block(&self, block: &did::Block<did::Transaction>) -> Result<(), RemoteClientError> {
+    async fn check_block(
+        &self,
+        block: &did::Block<did::Transaction>,
+        reth_block: &reth_primitives::Block,
+        evm_block_validator: Option<&BitfinityBlockValidator<IcAgentClient, Arc<DatabaseEnv>>>,
+    ) -> Result<(), RemoteClientError> {
         if block.number < self.certified_data.data.number {
             return Ok(());
         }
@@ -459,6 +490,11 @@ impl BlockCertificateChecker {
         })?;
         Self::validate_tree(self.evmc_principal.as_ref(), &certificate, &tree);
 
+        if let Some(evm_block_validator) = evm_block_validator {
+            Self::validate_block(evm_block_validator, reth_block.clone(), &block.transactions)
+                .await?;
+        }
+
         Ok(())
     }
 
@@ -478,6 +514,19 @@ impl BlockCertificateChecker {
         }
 
         true
+    }
+
+    /// Validate block on the EVM
+    async fn validate_block(
+        validator: &BitfinityBlockValidator<IcAgentClient, Arc<DatabaseEnv>>,
+        block: reth_primitives::Block,
+        transactions: &[did::Transaction],
+    ) -> Result<(), RemoteClientError> {
+        tracing::debug!("Validating block {}", block.number);
+
+        validator.validate_block(block, transactions).await.map_err(|e| {
+            RemoteClientError::BlockValidationError(format!("failed to validate block: {e}"))
+        })
     }
 }
 
@@ -583,6 +632,7 @@ mod tests {
                 backup_url: None,
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
+                evm_block_validator: None,
             },
             0,
             Some(5),
@@ -603,6 +653,7 @@ mod tests {
                 backup_url: Some("https://cloudflare-eth.com".to_string()),
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
+                evm_block_validator: None,
             },
             0,
             Some(5),
@@ -623,6 +674,7 @@ mod tests {
                 backup_url: None,
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
+                evm_block_validator: None,
             },
             0,
             Some(5),
@@ -654,6 +706,7 @@ mod tests {
                 backup_url: None,
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
+                evm_block_validator: None,
             },
             0,
             Some(5),
