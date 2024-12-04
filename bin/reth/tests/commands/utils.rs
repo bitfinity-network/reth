@@ -153,6 +153,9 @@ pub async fn bitfinity_import_config_data(
         backup_rpc_url: backup_evm_datasource_url,
         max_retries: 3,
         retry_delay_secs: 3,
+        validate_block_ic_identity_file_path: None,
+        evm_network: "ic".to_string(),
+        fetch_ic_root_key: false,
     };
 
     Ok((

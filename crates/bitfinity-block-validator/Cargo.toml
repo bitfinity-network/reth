@@ -1,0 +1,27 @@
+[package]
+name = "bitfinity-block-validator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+did.workspace = true
+evm-canister-client.workspace = true
+ic-agent.workspace = true
+ic-canister-client.workspace = true
+itertools.workspace = true
+reth-db.workspace = true
+reth-engine-tree.workspace = true
+reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
+reth-provider.workspace = true
+reth-primitives.workspace = true
+reth-revm.workspace = true
+tracing.workspace = true

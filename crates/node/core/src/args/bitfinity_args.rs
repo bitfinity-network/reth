@@ -70,6 +70,10 @@ pub struct BitfinityImportArgs {
     /// - http://127.0.0.1:3333
     #[arg(long, default_value = "ic")]
     pub evm_network: String,
+
+    /// Fetch the IC root key (to be used on local networks)
+    #[arg(long, default_value = "false")]
+    pub fetch_ic_root_key: bool,
 }
 
 /// Bitfinity Related Args

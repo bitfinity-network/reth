@@ -118,17 +118,20 @@ libc = "0.2"
 # bitfinity dependencies
 async-trait = { workspace = true }
 async-channel.workspace = true
+bitfinity-block-validator.workspace = true
 candid.workspace = true
 did.workspace = true
 ethereum-json-rpc-client = { workspace = true, features = ["reqwest"] }
 evm-canister-client = { workspace = true, features = ["ic-agent-client"] }
+hex.workspace = true
+reth-engine-tree.workspace = true
+reth-evm-ethereum.workspace = true
 lightspeed_scheduler = { workspace = true, features = ["tracing"] }
 rlp = { workspace = true }
 serial_test.workspace = true
 
 [dev-dependencies]
 reth-discv4.workspace = true
-
 
 
 # bitfinity dev dependencies

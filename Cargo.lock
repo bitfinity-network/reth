@@ -1271,6 +1271,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
 
 [[package]]
+name = "bitfinity-block-validator"
+version = "1.0.0"
+dependencies = [
+ "async-trait",
+ "did",
+ "evm-canister-client",
+ "ic-agent",
+ "ic-canister-client",
+ "itertools 0.13.0",
+ "reth-db",
+ "reth-engine-tree",
+ "reth-evm",
+ "reth-evm-ethereum",
+ "reth-primitives",
+ "reth-provider",
+ "reth-revm",
+ "tracing",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7110,6 +7130,7 @@ dependencies = [
  "async-channel 2.3.1",
  "async-trait",
  "backon",
+ "bitfinity-block-validator",
  "candid",
  "clap",
  "confy",
@@ -7121,6 +7142,7 @@ dependencies = [
  "eyre",
  "fdlimit",
  "futures",
+ "hex",
  "itertools 0.13.0",
  "jsonrpsee",
  "libc",
@@ -7144,10 +7166,12 @@ dependencies = [
  "reth-db-common",
  "reth-discv4",
  "reth-downloaders",
+ "reth-engine-tree",
  "reth-engine-util",
  "reth-errors",
  "reth-ethereum-payload-builder",
  "reth-evm",
+ "reth-evm-ethereum",
  "reth-execution-types",
  "reth-exex",
  "reth-fs-util",
@@ -7726,13 +7750,17 @@ dependencies = [
  "alloy-rlp",
  "assert_matches",
  "backon",
+ "bitfinity-block-validator",
  "candid",
  "did",
  "ethereum-json-rpc-client",
+ "evm-canister-client",
  "eyre",
  "futures",
  "futures-util",
  "hex",
+ "ic-agent",
+ "ic-canister-client",
  "ic-cbor",
  "ic-certificate-verification",
  "ic-certification",
