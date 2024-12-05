@@ -260,6 +260,58 @@ async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
     }
 }
 
+#[tokio::test]
+async fn bitfinity_test_node_get_transaction_when_it_is_queued() {
+    // Arrange
+    let _log = init_logs();
+
+    let eth_server = EthImpl::new(None);
+
+    let queue = Arc::new(Mutex::new(TransactionsPriorityQueue::new(10)));
+
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let bitfinity_evm_url = format!("http://{}", eth_server_address);
+    let (reth_client, _reth_node) =
+        start_reth_node(Some(bitfinity_evm_url.clone()), None, Some(queue.clone())).await;
+
+    const TXS_NUMBER: usize = 10;
+
+    // Create a random transactions
+    let transactions = (1..=TXS_NUMBER)
+        .map(|i| alloy_rlp::encode(transaction_with_gas_price(100 * i as u128)))
+        .collect::<Vec<_>>();
+
+    let expected_hashes = transactions.iter().map(|tx| keccak::keccak_hash(tx)).collect::<Vec<_>>();
+
+    // Act
+    for (tx, expected_hash) in transactions.iter().zip(expected_hashes.iter()) {
+        let hash = reth_client.send_raw_transaction_bytes(tx).await.unwrap();
+        assert_eq!(hash.to_fixed_bytes(), expected_hash.0.to_fixed_bytes());
+    }
+
+    for hash in &expected_hashes {
+        let tx = reth_client.get_transaction_by_hash(hash.0).await.unwrap().unwrap();
+        // Transaction in forwarder has NO block number.
+        assert!(tx.block_number.is_none());
+    }
+
+    let transaction_sending = BitfinityTransactionSender::new(
+        queue,
+        bitfinity_evm_url,
+        Duration::from_millis(200),
+        10,
+        100,
+    );
+    transaction_sending.single_execution().await.unwrap();
+
+    for hash in &expected_hashes {
+        let tx = reth_client.get_transaction_by_hash(hash.0).await.unwrap().unwrap();
+        // Transaction in mock has block number.
+        assert!(tx.block_number.is_some());
+    }
+}
+
 /// Waits until `n` transactions appear in `received_txs` with one second timeout.
 /// Returns true if `received_txs` contains at least `n` transactions.
 async fn consume_received_txs(received_txs: &mut Receiver<B256>, n: usize) -> Option<Vec<B256>> {
@@ -398,8 +450,9 @@ pub mod eth_server {
     use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
     use reth_primitives::TransactionSigned;
+    use reth_rpc_types::Transaction;
     use revm_primitives::{hex, Address, B256, U256};
-    use tokio::sync::mpsc::Sender;
+    use tokio::sync::{mpsc::Sender, Mutex};
 
     #[rpc(server, namespace = "eth")]
     pub trait Eth {
@@ -414,6 +467,10 @@ pub mod eth_server {
         /// Returns sendRawTransaction
         #[method(name = "sendRawTransaction")]
         async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256>;
+
+        /// Returns getTransactionByHash
+        #[method(name = "getTransactionByHash")]
+        async fn get_transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction>>;
 
         /// Returns getGenesisBalances
         #[method(name = "getGenesisBalances", aliases = ["ic_getGenesisBalances"])]
@@ -433,6 +490,9 @@ pub mod eth_server {
         /// Current `max_priority_fee_per_gas`
         pub max_priority_fee_per_gas: u128,
 
+        /// List of received transactions.
+        pub received_txs: Mutex<Vec<B256>>,
+
         /// The mock will send transactions to the sender, if present.
         pub txs_sender: Option<Sender<B256>>,
     }
@@ -440,7 +500,12 @@ pub mod eth_server {
     impl EthImpl {
         /// New mock instance.
         pub fn new(txs_sender: Option<Sender<B256>>) -> Self {
-            Self { gas_price: rand::random(), max_priority_fee_per_gas: rand::random(), txs_sender }
+            Self {
+                gas_price: rand::random(),
+                max_priority_fee_per_gas: rand::random(),
+                received_txs: Mutex::default(),
+                txs_sender,
+            }
         }
     }
 
@@ -464,10 +529,43 @@ pub mod eth_server {
             let decoded = hex::decode(&tx).unwrap();
             let tx = TransactionSigned::decode(&mut decoded.as_ref()).unwrap();
             let hash = tx.hash();
+            self.received_txs.lock().await.push(hash);
             if let Some(sender) = &self.txs_sender {
                 sender.send(hash).await.unwrap();
             }
             Ok(hash)
+        }
+
+        async fn get_transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction>> {
+            if !self.received_txs.lock().await.contains(&hash) {
+                return Ok(None);
+            }
+
+            // If tx present, ruturn it with some block number.
+            let tx = Transaction {
+                hash,
+                nonce: 42,
+                block_hash: Some(B256::random()),
+                block_number: Some(42),
+                transaction_index: Some(42),
+                from: Address::random(),
+                to: Some(Address::random()),
+                value: Default::default(),
+                gas_price: Default::default(),
+                gas: Default::default(),
+                max_fee_per_gas: Default::default(),
+                max_priority_fee_per_gas: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                input: Default::default(),
+                signature: Default::default(),
+                chain_id: Default::default(),
+                blob_versioned_hashes: Default::default(),
+                access_list: Default::default(),
+                transaction_type: Default::default(),
+                other: Default::default(),
+            };
+
+            Ok(Some(tx))
         }
 
         async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>> {

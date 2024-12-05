@@ -4,13 +4,13 @@ use std::sync::Arc;
 
 use alloy_rlp::Decodable;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
-use ethereum_json_rpc_client::{Block, CertifiedResult, Id, Params, H256};
+use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
 use futures::Future;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
 use reth_primitives::TransactionSigned;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
-use reth_rpc_types::{Signature, Transaction};
+use reth_rpc_types::{AccessList, AccessListItem, Signature, Transaction};
 use revm_primitives::{Address, Bytes, B256, U256};
 
 use crate::RawTransactionForwarder;
@@ -58,23 +58,8 @@ pub trait BitfinityEvmRpc {
                 }
             };
 
-            // If transaction not found in forwarder, query it from EVM rpc.
-            let (rpc_url, client) = get_client(&chain_spec)?;
-            let method = "eth_getTransactionByHash".to_string();
-            let tx: Option<Transaction> = client
-                .single_request(
-                    method.clone(),
-                    Params::Array(vec![hash.to_string().into()]),
-                    Id::Str(method),
-                )
-                .await
-                .map_err(|e| {
-                    internal_rpc_err(format!(
-                        "failed to forward eth_getTransactionByHash request to {}: {}",
-                        rpc_url, e
-                    ))
-                })?;
-
+            // If transaction is not found in forwarder, query it from EVM rpc.
+            let tx = transaction_from_evm_rpc(&chain_spec, hash).await?;
             Ok(tx)
         }
     }
@@ -217,6 +202,94 @@ async fn get_transaction_from_forwarder(
         blob_versioned_hashes: typed_tx.blob_versioned_hashes(),
         access_list: typed_tx.access_list().cloned(),
         transaction_type: Some(typed_tx.transaction.tx_type().into()),
+        other: Default::default(),
+    };
+
+    Ok(Some(tx))
+}
+
+async fn transaction_from_evm_rpc(
+    chain_spec: &ChainSpec,
+    hash: B256,
+) -> RpcResult<Option<Transaction>> {
+    let (rpc_url, client) = get_client(chain_spec)?;
+    let tx = client.get_transaction_by_hash(hash.0.into()).await.map_err(|e| {
+        internal_rpc_err(format!(
+            "failed to forward eth_getTransactionByHash request to {}: {}",
+            rpc_url, e
+        ))
+    })?;
+
+    let Some(typed_tx) = tx else { return Ok(None) };
+
+    fn to_u128_or_err(val: ethereum_json_rpc_client::U256) -> RpcResult<u128> {
+        if val > ethereum_json_rpc_client::U256::from(u128::MAX) {
+            return Err(invalid_params_rpc_err("value expected to be less then u128::MAX"));
+        }
+        Ok(val.low_u128())
+    }
+
+    fn to_u64_or_err(val: ethereum_json_rpc_client::U256) -> RpcResult<u64> {
+        if val > ethereum_json_rpc_client::U256::from(u128::MAX) {
+            return Err(invalid_params_rpc_err("value expected to be less then u64::MAX"));
+        }
+        Ok(val.low_u64())
+    }
+
+    let convert_access_list = || {
+        let items = typed_tx
+            .access_list?
+            .0
+            .iter()
+            .map(|item| AccessListItem {
+                address: item.address.0.into(),
+                storage_keys: item.storage_keys.iter().map(|i| i.0.into()).collect(),
+            })
+            .collect();
+        Some(AccessList(items))
+    };
+
+    let signature = Signature {
+        r: U256::from_limbs(typed_tx.r.0),
+        s: U256::from_limbs(typed_tx.s.0),
+        v: U256::from(typed_tx.v.as_u64()),
+        y_parity: None,
+    };
+
+    let transaction_type = typed_tx
+        .transaction_type
+        .map(|v| {
+            let tx_type_u64 = v.as_u64();
+            if tx_type_u64 > u8::MAX as u64 {
+                return Err(invalid_params_rpc_err("transaction type should be less than u8::MAX"));
+            }
+            Ok(tx_type_u64 as u8)
+        })
+        .transpose()?;
+
+    let tx = Transaction {
+        hash,
+        nonce: typed_tx.nonce.as_u64(),
+        block_hash: None,
+        block_number: None,
+        transaction_index: None,
+        from: typed_tx.from.0.into(),
+        to: typed_tx.to.map(|addr| addr.0.into()),
+        value: U256::from_limbs(typed_tx.value.0),
+        gas_price: typed_tx.gas_price.map(to_u128_or_err).transpose()?,
+        gas: to_u128_or_err(typed_tx.gas)?,
+        max_fee_per_gas: typed_tx.max_fee_per_gas.map(to_u128_or_err).transpose()?,
+        max_priority_fee_per_gas: typed_tx
+            .max_priority_fee_per_gas
+            .map(to_u128_or_err)
+            .transpose()?,
+        max_fee_per_blob_gas: None,
+        input: typed_tx.input.to_vec().into(),
+        signature: Some(signature),
+        chain_id: typed_tx.chain_id.map(to_u64_or_err).transpose()?,
+        blob_versioned_hashes: None,
+        access_list: convert_access_list(),
+        transaction_type,
         other: Default::default(),
     };
 
