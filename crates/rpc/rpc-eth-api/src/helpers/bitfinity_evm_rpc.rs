@@ -270,9 +270,9 @@ async fn transaction_from_evm_rpc(
     let tx = Transaction {
         hash,
         nonce: typed_tx.nonce.as_u64(),
-        block_hash: None,
-        block_number: None,
-        transaction_index: None,
+        block_hash: typed_tx.block_hash.map(|h| h.0.into()),
+        block_number: typed_tx.block_number.map(|v| v.as_u64()),
+        transaction_index: typed_tx.transaction_index.map(|v| v.as_u64()),
         from: typed_tx.from.0.into(),
         to: typed_tx.to.map(|addr| addr.0.into()),
         value: U256::from_limbs(typed_tx.value.0),

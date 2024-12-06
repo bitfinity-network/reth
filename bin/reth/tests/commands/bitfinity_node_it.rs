@@ -289,7 +289,7 @@ async fn bitfinity_test_node_get_transaction_when_it_is_queued() {
     let (reth_client, _reth_node) =
         start_reth_node(&tasks, Some(bitfinity_evm_url.clone()), None, Some(queue.clone())).await;
 
-    const TXS_NUMBER: usize = 1;
+    const TXS_NUMBER: usize = 10;
 
     // Create a random transactions
     let transactions = (1..=TXS_NUMBER)
@@ -472,10 +472,11 @@ async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle, So
 /// Eth server mock utils.
 pub mod eth_server {
     use alloy_rlp::{Bytes, Decodable};
+    use discv5::enr::secp256k1::{Keypair, Secp256k1};
     use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-    use reth_primitives::TransactionSigned;
-    use reth_rpc_types::Transaction;
+    use reth_primitives::{sign_message, TransactionSigned};
+    use reth_rpc_types::{Signature, Transaction};
     use revm_primitives::{hex, Address, B256, U256};
     use tokio::sync::{mpsc::Sender, Mutex};
 
@@ -567,7 +568,7 @@ pub mod eth_server {
             }
 
             // If tx present, ruturn it with some block number.
-            let tx = Transaction {
+            let mut tx = Transaction {
                 hash,
                 nonce: 42,
                 block_hash: Some(B256::random()),
@@ -589,6 +590,15 @@ pub mod eth_server {
                 transaction_type: Default::default(),
                 other: Default::default(),
             };
+            let key_pair = Keypair::new(&Secp256k1::new(), &mut rand::thread_rng());
+            let signature =
+                sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.hash).unwrap();
+            tx.signature = Some(Signature {
+                r: signature.r,
+                s: signature.s,
+                v: U256::from(signature.v(None)),
+                y_parity: None,
+            });
 
             Ok(Some(tx))
         }
