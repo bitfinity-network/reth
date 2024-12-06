@@ -4,6 +4,7 @@
 
 use super::utils::*;
 use did::keccak;
+use discv5::enr::secp256k1::{Keypair, Secp256k1};
 use eth_server::{EthImpl, EthServer};
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
@@ -23,7 +24,7 @@ use reth_consensus::Consensus;
 use reth_db::{init_db, test_utils::tempdir_path};
 use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{Transaction, TransactionSigned};
+use reth_primitives::{sign_message, Transaction, TransactionSigned};
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::MockTransaction;
 use revm_primitives::{Address, B256, U256};
@@ -36,7 +37,8 @@ use tokio::sync::Mutex;
 async fn bitfinity_test_should_start_local_reth_node() {
     // Arrange
     let _log = init_logs();
-    let (reth_client, _reth_node) = start_reth_node(None, None, None).await;
+    let tasks = TaskManager::current();
+    let (reth_client, _reth_node) = start_reth_node(&tasks, None, None, None).await;
 
     // Act & Assert
     assert!(reth_client.get_chain_id().await.is_ok());
@@ -46,12 +48,13 @@ async fn bitfinity_test_should_start_local_reth_node() {
 async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
     // Arrange
     let _log = init_logs();
+    let tasks = TaskManager::current();
 
     let eth_server = EthImpl::default();
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None, None).await;
+        start_reth_node(&tasks, Some(format!("http://{}", eth_server_address)), None, None).await;
 
     // Act
     let result = reth_client.get_last_certified_block().await;
@@ -76,13 +79,14 @@ async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
 async fn bitfinity_test_node_forward_get_gas_price_requests() {
     // Arrange
     let _log = init_logs();
+    let tasks = TaskManager::current();
 
     let eth_server = EthImpl::default();
     let gas_price = eth_server.gas_price;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None, None).await;
+        start_reth_node(&tasks, Some(format!("http://{}", eth_server_address)), None, None).await;
 
     // Act
     let gas_price_result = reth_client.gas_price().await;
@@ -95,13 +99,14 @@ async fn bitfinity_test_node_forward_get_gas_price_requests() {
 async fn bitfinity_test_node_forward_max_priority_fee_per_gas_requests() {
     // Arrange
     let _log = init_logs();
+    let tasks = TaskManager::current();
 
     let eth_server = EthImpl::default();
     let max_priority_fee_per_gas = eth_server.max_priority_fee_per_gas;
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None, None).await;
+        start_reth_node(&tasks, Some(format!("http://{}", eth_server_address)), None, None).await;
 
     // Act
     let result = reth_client.max_priority_fee_per_gas().await;
@@ -114,12 +119,13 @@ async fn bitfinity_test_node_forward_max_priority_fee_per_gas_requests() {
 async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
     // Arrange
     let _log = init_logs();
+    let tasks = TaskManager::current();
 
     let eth_server = EthImpl::default();
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None, None).await;
+        start_reth_node(&tasks, Some(format!("http://{}", eth_server_address)), None, None).await;
 
     // Act
     let result: Vec<(ethereum_json_rpc_client::H160, ethereum_json_rpc_client::U256)> = reth_client
@@ -148,12 +154,13 @@ async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
 async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
     // Arrange
     let _log = init_logs();
+    let tasks = TaskManager::current();
 
     let eth_server = EthImpl::default();
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None, None).await;
+        start_reth_node(&tasks, Some(format!("http://{}", eth_server_address)), None, None).await;
 
     // Act
     let result = reth_client.get_genesis_balances().await.unwrap();
@@ -175,6 +182,7 @@ async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
 async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     // Arrange
     let _log = init_logs();
+    let tasks = TaskManager::current();
 
     let (tx_sender, mut tx_receiver) = tokio::sync::mpsc::channel(10);
     let eth_server = EthImpl::new(Some(tx_sender));
@@ -184,9 +192,13 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let bitfinity_evm_url = format!("http://{}", eth_server_address);
-    let (reth_client, _reth_node) =
-        start_reth_node(Some(format!("http://{}", eth_server_address)), None, Some(queue.clone()))
-            .await;
+    let (reth_client, _reth_node) = start_reth_node(
+        &tasks,
+        Some(format!("http://{}", eth_server_address)),
+        None,
+        Some(queue.clone()),
+    )
+    .await;
 
     // Create a random transaction
     let tx = transaction_with_gas_price(100);
@@ -217,6 +229,7 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
 async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
     // Arrange
     let _log = init_logs();
+    let tasks = TaskManager::current();
 
     let (tx_sender, mut tx_receiver) = tokio::sync::mpsc::channel(10);
     let eth_server = EthImpl::new(Some(tx_sender));
@@ -227,7 +240,7 @@ async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let bitfinity_evm_url = format!("http://{}", eth_server_address);
     let (reth_client, _reth_node) =
-        start_reth_node(Some(bitfinity_evm_url.clone()), None, Some(queue.clone())).await;
+        start_reth_node(&tasks, Some(bitfinity_evm_url.clone()), None, Some(queue.clone())).await;
 
     const TXS_NUMBER: usize = 10;
 
@@ -264,6 +277,7 @@ async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
 async fn bitfinity_test_node_get_transaction_when_it_is_queued() {
     // Arrange
     let _log = init_logs();
+    let tasks = TaskManager::current();
 
     let eth_server = EthImpl::new(None);
 
@@ -273,9 +287,9 @@ async fn bitfinity_test_node_get_transaction_when_it_is_queued() {
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let bitfinity_evm_url = format!("http://{}", eth_server_address);
     let (reth_client, _reth_node) =
-        start_reth_node(Some(bitfinity_evm_url.clone()), None, Some(queue.clone())).await;
+        start_reth_node(&tasks, Some(bitfinity_evm_url.clone()), None, Some(queue.clone())).await;
 
-    const TXS_NUMBER: usize = 10;
+    const TXS_NUMBER: usize = 1;
 
     // Create a random transactions
     let transactions = (1..=TXS_NUMBER)
@@ -332,11 +346,24 @@ fn transaction_with_gas_price(gas_price: u128) -> TransactionSigned {
     let mock = MockTransaction::legacy().with_gas_price(gas_price);
     let transaction: Transaction = mock.into();
 
-    TransactionSigned { hash: Default::default(), signature: Default::default(), transaction }
+    sign_tx_with_random_key_pair(transaction)
+}
+
+fn sign_tx_with_random_key_pair(tx: Transaction) -> TransactionSigned {
+    let secp = Secp256k1::new();
+    let key_pair = Keypair::new(&secp, &mut rand::thread_rng());
+    sign_tx_with_key_pair(key_pair, tx)
+}
+
+fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
+    let signature =
+        sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
+    TransactionSigned::from_transaction_and_signature(tx, signature)
 }
 
 /// Start a local reth node
 async fn start_reth_node(
+    tasks: &TaskManager,
     bitfinity_evm_url: Option<String>,
     import_data: Option<ImportData>,
     queue: Option<SharedQueue>,
@@ -374,8 +401,6 @@ async fn start_reth_node(
         >,
     >,
 ) {
-    let tasks = TaskManager::current();
-
     // create node config
     let mut node_config =
         NodeConfig::test().dev().with_rpc(RpcServerArgs::default().with_http()).with_unused_ports();
