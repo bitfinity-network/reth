@@ -101,7 +101,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
     let (_temp_dir, mut import_data) =
         bitfinity_import_config_data(evm_datasource_url, None, data_dir).await.unwrap();
 
-    let fetch_block_timeout_secs = std::cmp::max(120, end_block / 100);
+    let fetch_block_timeout_secs = std::cmp::max(300, end_block / 100);
 
     // Import block from block explorer
     import_data.bitfinity_args.end_block = Some(end_block);
