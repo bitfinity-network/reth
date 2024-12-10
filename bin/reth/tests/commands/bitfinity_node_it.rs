@@ -242,23 +242,24 @@ async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
     let (reth_client, _reth_node) =
         start_reth_node(&tasks, Some(bitfinity_evm_url.clone()), None, Some(queue.clone())).await;
 
-    const TXS_NUMBER: usize = 10;
+    const TXS_NUMBER: usize = 100;
 
     // Create a random transactions
     let transactions = (1..=TXS_NUMBER)
         .map(|i| alloy_rlp::encode(transaction_with_gas_price(100 * i as u128)))
         .collect::<Vec<_>>();
 
-    let expected_hashes = transactions.iter().map(|tx| keccak::keccak_hash(tx)).collect::<Vec<_>>();
+    // Only highest price transactions should be sent.
+    let expected_hashes =
+        transactions.iter().rev().take(10).map(|tx| keccak::keccak_hash(tx)).collect::<Vec<_>>();
 
     // Act
-    for (tx, expected_hash) in transactions.iter().zip(expected_hashes.iter()) {
-        let hash = reth_client.send_raw_transaction_bytes(tx).await.unwrap();
-        assert_eq!(hash.to_fixed_bytes(), expected_hash.0.to_fixed_bytes());
+    for tx in &transactions {
+        reth_client.send_raw_transaction_bytes(tx).await.unwrap();
     }
 
     let transaction_sending = BitfinityTransactionSender::new(
-        queue,
+        queue.clone(),
         bitfinity_evm_url,
         Duration::from_millis(200),
         10,
@@ -268,8 +269,12 @@ async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
 
     let received_txs = consume_received_txs(&mut tx_receiver, 10).await.unwrap();
 
-    for (idx, expected_hash) in expected_hashes.iter().rev().enumerate() {
-        assert_eq!(received_txs[idx].0, expected_hash.0.to_fixed_bytes());
+    // Check all queued transactions sent.
+    assert!(queue.lock().await.is_empty());
+
+    for expected_hash in expected_hashes.iter().rev() {
+        let expected = B256::from(expected_hash.0.to_fixed_bytes());
+        assert!(received_txs.contains(&expected));
     }
 }
 

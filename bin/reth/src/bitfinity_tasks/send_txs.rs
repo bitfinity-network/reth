@@ -10,6 +10,7 @@ use did::H256;
 use ethereum_json_rpc_client::reqwest::ReqwestClient;
 use ethereum_json_rpc_client::{EthJsonRpcClient, Id, Params};
 use eyre::eyre;
+use futures::future::join_all;
 use lightspeed_scheduler::job::Job;
 use lightspeed_scheduler::scheduler::Scheduler;
 use lightspeed_scheduler::JobExecutor;
@@ -79,31 +80,41 @@ impl BitfinityTransactionSender {
 
     /// Execute the transaction sending job.
     pub async fn single_execution(&self) -> eyre::Result<()> {
-        let mut total_sent = 0;
+        let mut to_send = self.get_transactions_to_send().await;
+        let batch_size = self.batch_size.max(1);
+        let mut send_futures = vec![];
+
         loop {
-            let to_send = self.get_transactions_to_send().await;
-            let result = match to_send.len() {
-                0 => return Ok(()),
-                1 => self.send_single_tx(&to_send[0].1).await,
-                _ => self.send_txs_batch(&to_send).await,
+            let last_idx = batch_size.min(to_send.len());
+            if last_idx == 0 {
+                break;
+            }
+
+            let to_send_batch: Vec<_> = to_send.drain(..last_idx).collect();
+
+            let send_future = async move {
+                let result = match to_send_batch.len() {
+                    0 => return,
+                    1 => self.send_single_tx(&to_send_batch[0].1).await,
+                    _ => self.send_txs_batch(&to_send_batch).await,
+                };
+
+                if let Err(e) = result {
+                    warn!("Failed to send transactions to EVM: {e}");
+                }
             };
-
-            if let Err(e) = result {
-                warn!("Failed to send transactions to EVM: {e}");
-                continue;
-            }
-
-            total_sent += to_send.len();
-            if total_sent > self.txs_per_execution_threshold {
-                return Ok(());
-            }
+            send_futures.push(send_future);
         }
+
+        join_all(send_futures).await;
+
+        Ok(())
     }
 
     async fn get_transactions_to_send(&self) -> Vec<(U256, Vec<u8>)> {
-        let mut batch = Vec::with_capacity(self.batch_size);
+        let mut batch = Vec::with_capacity(self.txs_per_execution_threshold);
         let mut queue = self.queue.lock().await;
-        let txs_to_pop = self.batch_size.max(1); // if batch size is zero, take at least one tx.
+        let txs_to_pop = self.txs_per_execution_threshold.max(1); // if batch size is zero, take at least one tx.
 
         for _ in 0..txs_to_pop {
             let Some(entry) = queue.pop_tx_with_highest_price() else {
