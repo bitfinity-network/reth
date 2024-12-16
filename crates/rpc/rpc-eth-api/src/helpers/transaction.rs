@@ -105,7 +105,7 @@ pub trait EthTransactions: LoadTransaction {
             if let Some(tx) =
                 self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
             {
-                return Ok(Some(tx))
+                return Ok(Some(tx));
             }
 
             self.spawn_blocking_io(move |ref this| {
@@ -201,7 +201,7 @@ pub trait EthTransactions: LoadTransaction {
                         block_number,
                         base_fee_per_gas,
                         index.into(),
-                    )))
+                    )));
                 }
             }
 
@@ -223,7 +223,7 @@ pub trait EthTransactions: LoadTransaction {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
                 if let Some(tx) = block.transactions().nth(index.into()) {
-                    return Ok(Some(tx.envelope_encoded()))
+                    return Ok(Some(tx.envelope_encoded()));
                 }
             }
 
@@ -476,7 +476,7 @@ pub trait EthTransactions: LoadTransaction {
                 return match signer.sign_transaction(request, from) {
                     Ok(tx) => Ok(tx),
                     Err(e) => Err(e.into()),
-                }
+                };
             }
         }
         Err(EthApiError::InvalidTransactionSignature)
@@ -647,4 +647,10 @@ pub trait LoadTransaction: SpawnBlocking {
 pub trait RawTransactionForwarder: fmt::Debug + Send + Sync + 'static {
     /// Forwards raw transaction bytes for `eth_sendRawTransaction`
     async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()>;
+
+    /// Added by Bitfinity.
+    /// Method to check if the transaction is forwarding.
+    async fn get_transaction_by_hash(&self, _hash: B256) -> Option<Vec<u8>> {
+        None
+    }
 }

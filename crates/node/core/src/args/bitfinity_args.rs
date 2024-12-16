@@ -56,6 +56,37 @@ pub struct BitfinityImportArgs {
     /// Root key for the IC network
     #[arg(long, value_name = "IC_ROOT_KEY", default_value = IC_MAINNET_KEY)]
     pub ic_root_key: String,
+
+    /// Enable transactions priority queue
+    /// Default: true
+    #[arg(long, value_name = "TX_PRIORITY_QUEUE", default_value = "true")]
+    pub tx_queue: bool,
+
+    /// Transactions priority queue will contain this much transactions at max.
+    /// Default: 1000
+    #[arg(long, value_name = "TX_PRIORITY_QUEUE_SIZE", default_value = "1000")]
+    pub tx_queue_size: usize,
+
+    /// Time period to send transactions batch from the priority queue.
+    /// Do nothing, if `tx_queue` is disabled.
+    /// Default: 3
+    #[arg(long, value_name = "SEND_QUEUED_TXS_PERIOD_SECS", default_value = "3")]
+    pub send_queued_txs_period_secs: u64,
+
+    /// Send queued transactions by batches with this number of entries.
+    /// If set to 0 or 1, no batching is used.
+    /// Do nothing, if `tx_queue` is disabled.
+    /// Default: 10
+    #[arg(long, value_name = "QUEUED_TXS_BATCH_SIZE", default_value = "10")]
+    pub queued_txs_batch_size: usize,
+
+    /// If transaction sender sent more queued transactions at single execution,
+    /// it will wait for next execution to continue.
+    /// If set to 0, transaction sender will try to empty queue at each execution.
+    /// Do nothing, if `tx_queue` is disabled.
+    /// Default: 500
+    #[arg(long, value_name = "QUEUED_TXS_PER_EXECUTION", default_value = "500")]
+    pub queued_txs_per_execution_threshold: usize,
 }
 
 /// Bitfinity Related Args
@@ -76,12 +107,12 @@ pub struct BitfinityResetEvmStateArgs {
     /// Network url
     /// This is the URL of the IC network.
     /// E.g.
-    /// - https://ic0.app
-    /// - http://127.0.0.1:3333
+    /// - <https://ic0.app>
+    /// - <http://127.0.0.1:3333>
     #[arg(long)]
     pub evm_network: String,
 
-    /// URL used to fetch the ChainSpec information.
+    /// URL used to fetch the `ChainSpec` information.
     /// This is usually the URL of the Bitfinity EVM block extractor.
     #[arg(long)]
     pub evm_datasource_url: String,

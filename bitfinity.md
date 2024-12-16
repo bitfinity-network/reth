@@ -34,7 +34,7 @@ reth node -vvv --http --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth
 With cargo: 
 
 ```sh
-cargo run -p reth -- node -vvv --http --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth,net,trace,txpool,web3" --disable-discovery --ipcdisable --no-persist-peers -r https://orca-app-5yyst.ondigitalocean.app -i 30 -b 100 --max-fetch-blocks 5000 --log.file.directory ./target/logs --datadir ./target/reth
+cargo run -p reth -- node -vvv --http --http.port 8080 --http.addr 0.0.0.0 --http.api "debug,eth,net,trace,txpool,web3" --disable-discovery --ipcdisable --no-persist-peers -r https://block-extractor-testnet-1052151659755.europe-west9.run.app -i 30 -b 100 --max-fetch-blocks 5000 --log.file.directory ./target/logs --datadir ./target/reth
 ```
 
 You can query the node using the JSON-RPC API. For example, to get the block number, you can use the following command:
@@ -83,7 +83,7 @@ dfx canister --network=ic call EVM_CANISTER_ID admin_disable_evm '(true)'
 
 3. Run the EVM reset command. For example:
 ```sh
-cargo run -p reth -- bitfinity-reset-evm-state -vvv --datadir ./target/reth --ic-identity-file-path PATH_TO_IDENTITY/identity.pem --evm-network https://ic0.app --evmc-principal EVM_CANISTER_ID --evm-datasource-url https://orca-app-5yyst.ondigitalocean.app
+cargo run -p reth -- bitfinity-reset-evm-state -vvv --datadir ./target/reth --ic-identity-file-path PATH_TO_IDENTITY/identity.pem --evm-network https://ic0.app --evmc-principal EVM_CANISTER_ID --evm-datasource-url https://block-extractor-testnet-1052151659755.europe-west9.run.app
 ```
 
 4. Enable the EVM canister:

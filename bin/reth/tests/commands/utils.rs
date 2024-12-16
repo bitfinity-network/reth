@@ -1,3 +1,5 @@
+//! Bitfinity integration tests utils.
+
 use std::{
     fmt::{Debug, Display, Formatter},
     path::PathBuf,
@@ -34,10 +36,14 @@ use revm_primitives::db::Database;
 use tempfile::TempDir;
 use tracing::{debug, info};
 
+/// Local evm canister for tests.
 pub const LOCAL_EVM_CANISTER_ID: &str = "bkyz2-fmaaa-aaaaa-qaaaq-cai";
-/// EVM block extractor for devnet running on Digital Ocean.
-pub const DEFAULT_EVM_DATASOURCE_URL: &str = "https://orca-app-5yyst.ondigitalocean.app";
 
+/// EVM block extractor for devnet running on Digital Ocean.
+pub const DEFAULT_EVM_DATASOURCE_URL: &str =
+    "https://block-extractor-testnet-1052151659755.europe-west9.run.app";
+
+/// Initialize logger.
 pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
     let mut tracer = RethTracer::new();
     let stdout = LayerInfo::new(
@@ -52,13 +58,25 @@ pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
     Ok(guard)
 }
 
+/// Bitfinity config for reth node.
 #[derive(Clone)]
 pub struct ImportData {
+    /// Chain config.
     pub chain: Arc<ChainSpec>,
+
+    /// Path to data.
     pub data_dir: ChainPath<DataDirPath>,
+
+    /// Database config.
     pub database: Arc<DatabaseEnv>,
+
+    /// Database provider.
     pub provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+
+    /// Blockchain provider.
     pub blockchain_db: BlockchainProvider<Arc<DatabaseEnv>>,
+
+    /// Bitfinity import config.
     pub bitfinity_args: BitfinityImportArgs,
 }
 
@@ -83,7 +101,7 @@ pub async fn import_blocks(
         import_data.provider_factory.clone(),
         import_data.blockchain_db,
     );
-    let (job_executor, _import_handle) = import.schedule_execution().await.unwrap();
+    let (job_executor, _import_handle) = import.schedule_execution(None).await.unwrap();
     wait_until_local_block_imported(&import_data.provider_factory, end_block, timeout).await;
 
     if shutdown_when_done {
@@ -153,6 +171,11 @@ pub async fn bitfinity_import_config_data(
         backup_rpc_url: backup_evm_datasource_url,
         max_retries: 3,
         retry_delay_secs: 3,
+        tx_queue: false,
+        tx_queue_size: 1000,
+        send_queued_txs_period_secs: 3,
+        queued_txs_batch_size: 10,
+        queued_txs_per_execution_threshold: 100,
     };
 
     Ok((
@@ -179,6 +202,7 @@ pub async fn wait_until_local_block_imported(
     }
 }
 
+/// Returns local port of dfx replica.
 pub fn get_dfx_local_port() -> u16 {
     use std::process::Command;
     let output = Command::new("dfx")
