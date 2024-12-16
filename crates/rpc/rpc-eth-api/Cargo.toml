@@ -49,6 +49,7 @@ tracing.workspace = true
 
 # Bitfinity dependencies
 alloy-rlp.workspace = true
+did.workspace = true
 ethereum-json-rpc-client.workspace = true
 
 [features]

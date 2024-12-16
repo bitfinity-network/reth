@@ -24,7 +24,6 @@ use reth_primitives::{
     ruint::Uint, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainConfig, ForkCondition,
     Genesis, GenesisAccount, Header, HeadersDirection, B256, U256,
 };
-use rlp::Encodable;
 use serde_json::json;
 
 use std::time::Duration;
@@ -156,7 +155,7 @@ impl BitfinityEvmClient {
                     block_checker.check_block(&block)?;
                 }
                 let header =
-                    reth_primitives::Block::decode(&mut block.rlp_bytes().to_vec().as_slice())?;
+                    reth_primitives::Block::decode(&mut block.header_rlp_encoded().as_slice())?;
 
                 let block_hash = header.hash_slow();
 
@@ -266,10 +265,7 @@ impl BitfinityEvmClient {
                         k,
                         v
                     );
-                    (
-                        k.0.into(),
-                        GenesisAccount { balance: Uint::from_limbs(v.0), ..Default::default() },
-                    )
+                    (k.0 .0 .0.into(), GenesisAccount { balance: v.0, ..Default::default() })
                 },
             );
 
@@ -294,7 +290,7 @@ impl BitfinityEvmClient {
 
         let spec = ChainSpec {
             chain,
-            genesis_hash: genesis_block.hash.map(|h| h.0.into()),
+            genesis_hash: Some(genesis_block.hash.0 .0.into()),
             genesis,
             paris_block_and_final_difficulty: Some((0, Uint::ZERO)),
             hardforks: ChainHardforks::new(vec![
@@ -412,19 +408,11 @@ impl BlockCertificateChecker {
             .get_last_certified_block()
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
-        Ok(Self {
-            certified_data: CertifiedResult {
-                data: did::Block::from(certified_data.data),
-                certificate: certified_data.certificate,
-                witness: certified_data.witness,
-            },
-            evmc_principal,
-            ic_root_key,
-        })
+        Ok(Self { certified_data, evmc_principal, ic_root_key })
     }
 
     fn get_block_number(&self) -> u64 {
-        self.certified_data.data.number.0.as_u64()
+        self.certified_data.data.number.as_u64()
     }
 
     fn check_block(&self, block: &did::Block<did::Transaction>) -> Result<(), RemoteClientError> {
