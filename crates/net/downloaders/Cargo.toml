@@ -20,9 +20,7 @@ reth-network-peers.workspace = true
 reth-primitives.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
-
-# optional deps for the test-utils feature
-reth-db = { workspace = true, optional = true }
+reth-db = { workspace = true }
 reth-db-api = { workspace = true, optional = true }
 reth-testing-utils = { workspace = true, optional = true }
 
@@ -50,11 +48,15 @@ tempfile = { workspace = true, optional = true }
 itertools.workspace = true
 
 # Bitfinity deps
+bitfinity-block-validator.workspace = true
 candid.workspace = true
 did.workspace = true
 eyre.workspace = true
 ethereum-json-rpc-client.workspace = true
+evm-canister-client.workspace = true
 hex.workspace = true
+ic-agent.workspace = true
+ic-canister-client.workspace = true
 ic-cbor.workspace = true
 ic-certificate-verification.workspace = true
 ic-certification.workspace = true
