@@ -5,22 +5,27 @@ use std::fmt::Debug;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
-use alloy_rlp::Encodable;
+use alloy_rlp::{Decodable, Encodable};
 use clap::Parser;
 use did::evm_reset_state::EvmResetState;
 use did::{AccountInfoMap, RawAccountInfo, H160, H256};
 use evm_canister_client::{CanisterClient, EvmCanisterClient, IcAgentClient};
-use itertools::Itertools;
 use reth_db::cursor::DbCursorRO;
 use reth_db::transaction::DbTx;
 use reth_db::{init_db, tables, DatabaseEnv};
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
+use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_core::args::{BitfinityResetEvmStateArgs, DatadirArgs};
 use reth_node_core::dirs::{DataDirPath, MaybePlatformPath};
+use reth_node_ethereum::EthereumNode;
 use reth_primitives::StorageEntry;
 use reth_provider::providers::StaticFileProvider;
 use reth_provider::{BlockNumReader, BlockReader, ProviderFactory};
 use tracing::{debug, error, info, trace, warn};
+
+/// `ProviderFactory` type alias.
+pub type BitfinityResetEvmProviderFactory =
+    ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>;
 
 /// Builder for the `bitfinity reset evm state` command
 #[derive(Debug, Parser)]
@@ -39,9 +44,6 @@ pub struct BitfinityResetEvmStateCommandBuilder {
     #[clap(flatten)]
     pub bitfinity: BitfinityResetEvmStateArgs,
 }
-
-const MAX_REQUEST_BYTES: usize = 750_000;
-const SPLIT_ADD_ACCOUNTS_REQUEST_BYTES: usize = 1_000_000;
 
 impl BitfinityResetEvmStateCommandBuilder {
     /// Build the command
@@ -65,16 +67,23 @@ impl BitfinityResetEvmStateCommandBuilder {
         let data_dir = self.datadir.unwrap_or_chain_default(chain.chain, DatadirArgs::default());
         let db_path = data_dir.db();
         let db = Arc::new(init_db(db_path, Default::default())?);
-        let provider_factory = ProviderFactory::new(
+        let provider_factory: BitfinityResetEvmProviderFactory = ProviderFactory::new(
             db,
             chain,
             StaticFileProvider::read_write(data_dir.static_files())?,
         );
+        // let provider_factory = ProviderFactory::new(
+        //     db,
+        //     chain,
+        //     StaticFileProvider::read_write(data_dir.static_files())?,
+        // );
 
         Ok(BitfinityResetEvmStateCommand::new(
             provider_factory,
             executor,
             self.bitfinity.parallel_requests,
+            self.bitfinity.max_request_bytes,
+            self.bitfinity.max_account_request_bytes,
         ))
     }
 }
@@ -82,19 +91,23 @@ impl BitfinityResetEvmStateCommandBuilder {
 /// Command that initializes the reset of remote EVM node using the current node state
 #[derive(Debug)]
 pub struct BitfinityResetEvmStateCommand {
-    provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+    provider_factory: BitfinityResetEvmProviderFactory,
     executor: Arc<dyn ResetStateExecutor>,
     parallel_requests: usize,
+    max_request_bytes: usize,
+    max_account_request_bytes: usize,
 }
 
 impl BitfinityResetEvmStateCommand {
     /// Create a new instance of the command
     pub fn new(
-        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+        provider_factory: BitfinityResetEvmProviderFactory,
         executor: Arc<dyn ResetStateExecutor>,
         parallel_requests: usize,
+        max_request_bytes: usize,
+        max_account_request_bytes: usize,
     ) -> Self {
-        Self { provider_factory, executor, parallel_requests: parallel_requests.max(1) }
+        Self { provider_factory, executor, parallel_requests: parallel_requests.max(1), max_request_bytes, max_account_request_bytes }
     }
 
     /// Execute the command
@@ -128,6 +141,8 @@ impl BitfinityResetEvmStateCommand {
                 async_channel::bounded(self.parallel_requests * 20);
             let mut task_handles = vec![];
 
+            let max_account_request_bytes = self.max_account_request_bytes;
+
             // We need to create a number of tasks that will send the account data to the EVM
             for _ in 0..self.parallel_requests {
                 let receiver = accounts_receiver.clone();
@@ -138,6 +153,7 @@ impl BitfinityResetEvmStateCommand {
                         let result = split_and_send_add_accout_request(
                             &executor,
                             accounts,
+                            max_account_request_bytes,
                             start,
                             plain_accounts_total_count,
                             &plain_accounts_recovered_count,
@@ -149,7 +165,6 @@ impl BitfinityResetEvmStateCommand {
                             error!(target: "reth::cli", "{}", &error_message);
                             result.expect(&error_message);
                         }
-                        
                     }
                 }));
             }
@@ -189,7 +204,7 @@ impl BitfinityResetEvmStateCommand {
                     }
                     let StorageEntry { key, value } = storage_entry;
 
-                    let key: reth_primitives::U256 = key.into();
+                    let key: alloy_primitives::U256 = key.into();
                     storage.insert(key.into(), value.into());
                 }
 
@@ -197,7 +212,7 @@ impl BitfinityResetEvmStateCommand {
                     nonce: account.nonce.into(),
                     balance: account.balance.into(),
                     bytecode,
-                    storage: storage.into_iter().collect_vec(),
+                    storage: storage.into_iter().collect::<Vec<_>>(),
                 };
 
                 debug!(target: "reth::cli", "Account Address: {} Info: {:?}", address, account);
@@ -205,7 +220,7 @@ impl BitfinityResetEvmStateCommand {
                 accounts.data.insert((*address).into(), account);
                 debug!(target: "reth::cli", address=%address, "Storage tries recovered");
 
-                if accounts.estimate_byte_size() > MAX_REQUEST_BYTES {
+                if accounts.estimate_byte_size() > self.max_request_bytes {
                     let process_accounts = std::mem::replace(&mut accounts, AccountInfoMap::new());
                     accounts_sender.send(process_accounts).await?;
                 }
@@ -231,7 +246,7 @@ impl BitfinityResetEvmStateCommand {
             let mut buff = vec![];
             last_block.encode(&mut buff);
 
-            let did_block = rlp::decode::<did::Block<did::Transaction>>(&buff)?;
+            let did_block = did::Block::<did::Transaction>::decode(&mut buff.as_slice())?;
             let did_block: did::Block<H256> = did_block.into();
             self.executor.end(did_block).await?;
             info!(target: "reth::cli", "Block data sent successfully");
@@ -316,9 +331,6 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
                 }
             }
 
-            // if we reach here, we have failed to send the request. Last retry
-            client.reset_state(EvmResetState::AddAccounts(accounts.clone())).await??;
-
             Ok(())
         })
     }
@@ -340,12 +352,13 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
 async fn split_and_send_add_accout_request(
     executor: &Arc<dyn ResetStateExecutor>,
     accounts: AccountInfoMap,
+    max_account_request_bytes: usize,
     process_start: std::time::Instant,
     total_accounts: usize,
     processed_accounts: &AtomicUsize,
 ) -> eyre::Result<()> {
     let accounts_data_len = accounts.data.len();
-    for account in split_add_account_request_data(SPLIT_ADD_ACCOUNTS_REQUEST_BYTES, accounts) {
+    for account in split_add_account_request_data(max_account_request_bytes, accounts) {
         executor.add_accounts(account).await?;
     }
 

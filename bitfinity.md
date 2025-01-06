@@ -83,7 +83,13 @@ dfx canister --network=ic call EVM_CANISTER_ID admin_disable_evm '(true)'
 
 3. Run the EVM reset command. For example:
 ```sh
+<<<<<<< HEAD
 cargo run -p reth -- bitfinity-reset-evm-state -vvv --datadir ./target/reth --ic-identity-file-path PATH_TO_IDENTITY/identity.pem --evm-network https://ic0.app --evmc-principal EVM_CANISTER_ID --evm-datasource-url https://block-extractor-testnet-1052151659755.europe-west9.run.app
+||||||| 0e2237228
+cargo run -p reth -- bitfinity-reset-evm-state -vvv --datadir ./target/reth --ic-identity-file-path PATH_TO_IDENTITY/identity.pem --evm-network https://ic0.app --evmc-principal EVM_CANISTER_ID --evm-datasource-url https://orca-app-5yyst.ondigitalocean.app
+=======
+cargo run -p reth -- bitfinity-reset-evm-state -vvv --datadir ./target/reth --ic-identity-file-path PATH_TO_IDENTITY/identity.pem --evm-network https://ic0.app --evmc-principal EVM_CANISTER_ID --evm-datasource-url https://evm-testnet-block-extractor-app-hvnsf.ondigitalocean.app/
+>>>>>>> bitfinity-archive-node
 ```
 
 4. Enable the EVM canister:

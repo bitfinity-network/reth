@@ -1,95 +1,143 @@
 #![allow(missing_docs)]
 
-use std::{sync::Arc, time::Duration};
-
-use reth::bitfinity_tasks::send_txs::{
-    BitfinityTransactionSender, BitfinityTransactionsForwarder, TransactionsPriorityQueue,
-};
-use tokio::sync::Mutex;
-
-// We use jemalloc for performance reasons.
-#[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
-#[cfg(all(feature = "optimism", not(test)))]
-compile_error!("Cannot build the `reth` binary with the `optimism` feature flag enabled. Did you mean to build `op-reth`?");
+use clap::{Args, Parser};
+use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+use reth_node_builder::{
+    engine_tree_config::{
+        TreeConfig, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PERSISTENCE_THRESHOLD,
+    },
+    EngineNodeLauncher,
+};
+use reth_node_ethereum::node::EthereumAddOns;
+use reth_provider::providers::BlockchainProvider2;
+use reth_tracing::tracing::warn;
+use tracing::info;
 
-#[cfg(not(feature = "optimism"))]
+/// Parameters for configuring the engine
+#[derive(Debug, Clone, Args, PartialEq, Eq)]
+#[command(next_help_heading = "Engine")]
+pub struct EngineArgs {
+    /// Enable the experimental engine features on reth binary
+    ///
+    /// DEPRECATED: experimental engine is default now, use --engine.legacy to enable the legacy
+    /// functionality
+    #[arg(long = "engine.experimental", default_value = "false")]
+    pub experimental: bool,
+
+    /// Enable the legacy engine on reth binary
+    #[arg(long = "engine.legacy", default_value = "false")]
+    pub legacy: bool,
+
+    /// Configure persistence threshold for engine experimental.
+    #[arg(long = "engine.persistence-threshold", conflicts_with = "legacy", default_value_t = DEFAULT_PERSISTENCE_THRESHOLD)]
+    pub persistence_threshold: u64,
+
+    /// Configure the target number of blocks to keep in memory.
+    #[arg(long = "engine.memory-block-buffer-target", conflicts_with = "legacy", default_value_t = DEFAULT_MEMORY_BLOCK_BUFFER_TARGET)]
+    pub memory_block_buffer_target: u64,
+}
+
+impl Default for EngineArgs {
+    fn default() -> Self {
+        Self {
+            experimental: false,
+            legacy: false,
+            persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
+            memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+        }
+    }
+}
+
 fn main() {
     use reth::cli::Cli;
     use reth::commands::bitfinity_import::BitfinityImportCommand;
     use reth_node_ethereum::EthereumNode;
 
-    reth::sigsegv_handler::install();
+    reth_cli_util::sigsegv_handler::install();
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
     if std::env::var_os("RUST_BACKTRACE").is_none() {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    let queue = Arc::new(Mutex::new(TransactionsPriorityQueue::new(1000)));
-    let queue_clone = Arc::clone(&queue);
+    if let Err(err) =
+        Cli::<EthereumChainSpecParser, EngineArgs>::parse().run(|builder, engine_args| async move {
+            if engine_args.experimental {
+                warn!(target: "reth::cli", "Experimental engine is default now, and the --engine.experimental flag is deprecated. To enable the legacy functionality, use --engine.legacy.");
+            }
 
-    if let Err(err) = Cli::parse_args().run(move |builder, _| async {
-        let handle = builder
-            .node(EthereumNode::default())
-            .extend_rpc_modules(move |ctx| {
-                let forwarder_required = ctx.config().bitfinity_import_arg.tx_queue;
-                if forwarder_required {
-                    // Add custom forwarder with transactions priority queue.
-                    queue
-                        .blocking_lock()
-                        .set_size_limit(ctx.config().bitfinity_import_arg.tx_queue_size);
-
-                    let forwarder = BitfinityTransactionsForwarder::new(queue);
-                    ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(forwarder));
+            let use_legacy_engine = engine_args.legacy;
+            match use_legacy_engine {
+                false => {
+                    let engine_tree_config = TreeConfig::default()
+                        .with_persistence_threshold(engine_args.persistence_threshold)
+                        .with_memory_block_buffer_target(engine_args.memory_block_buffer_target);
+                    let handle = builder
+                        .with_types_and_provider::<EthereumNode, BlockchainProvider2<_>>()
+                        .with_components(EthereumNode::components())
+                        .with_add_ons(EthereumAddOns::default())
+                        .launch_with_fn(|builder| {
+                            let launcher = EngineNodeLauncher::new(
+                                builder.task_executor().clone(),
+                                builder.config().datadir(),
+                                engine_tree_config,
+                            );
+                            builder.launch_with(launcher)
+                        })
+                        .await?;
+                    handle.node_exit_future.await
                 }
+                true => {
+                    info!(target: "reth::cli", "Running with legacy engine");
+                    let handle = builder.launch_node(EthereumNode::default()).await?;
+                    let blockchain_provider = handle.node.provider.clone();
+                    let config = handle.node.config.config.clone();
+                    let chain = handle.node.chain_spec();
+                    let datadir = handle.node.data_dir.clone();
+                    let (provider_factory, bitfinity) = handle.bitfinity_import.clone().expect("Bitfinity import not configured");            
 
-                Ok(())
-            })
-            .launch()
-            .await?;
-
-        let blockchain_provider = handle.node.provider.clone();
-        let config = handle.node.config.config.clone();
-        let chain_spec = handle.node.chain_spec();
-        let datadir = handle.node.data_dir.clone();
-        let (provider_factory, bitfinity) =
-            handle.bitfinity_import.clone().expect("Bitfinity import not configured");
-
-        // Init bitfinity import
-        let executor = {
-            let import = BitfinityImportCommand::new(
-                config,
-                datadir,
-                chain_spec.clone(),
-                bitfinity.clone(),
-                provider_factory,
-                blockchain_provider,
-            );
-            let (executor, _job_handle) = import.schedule_execution(None).await?;
-            executor
-        };
-
-        if bitfinity.tx_queue {
-            let url = bitfinity.send_raw_transaction_rpc_url.unwrap_or(bitfinity.rpc_url);
-
-            // Init transaction sending cycle.
-            let period = Duration::from_secs(bitfinity.send_queued_txs_period_secs);
-            let transaction_sending = BitfinityTransactionSender::new(
-                queue_clone,
-                url,
-                period,
-                bitfinity.queued_txs_batch_size,
-                bitfinity.queued_txs_per_execution_threshold,
-            );
-            let _sending_handle = transaction_sending.schedule_execution(Some(executor)).await?;
-        }
-
-        handle.node_exit_future.await
-    }) {
+                    // Init bitfinity import
+                    {
+                        let import = BitfinityImportCommand::new(
+                            config,
+                            datadir,
+                            chain,
+                            bitfinity,
+                            provider_factory,
+                            blockchain_provider,
+                        );
+                        let _import_handle = import.schedule_execution(None).await?;
+                    };
+                    
+                    handle.node_exit_future.await
+                }
+            }
+        })
+    {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    /// A helper type to parse Args more easily
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[command(flatten)]
+        args: T,
+    }
+
+    #[test]
+    fn test_parse_engine_args() {
+        let default_args = EngineArgs::default();
+        let args = CommandParser::<EngineArgs>::parse_from(["reth"]).args;
+        assert_eq!(args, default_args);
     }
 }
