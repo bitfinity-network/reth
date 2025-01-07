@@ -15,11 +15,11 @@ use reth_rpc_types::engine::{
 /// Converts [`ExecutionPayloadV1`] to [Block]
 pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, PayloadError> {
     if payload.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-        return Err(PayloadError::ExtraData(payload.extra_data))
+        return Err(PayloadError::ExtraData(payload.extra_data));
     }
 
     if payload.base_fee_per_gas.is_zero() {
-        return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
+        return Err(PayloadError::BaseFee(payload.base_fee_per_gas));
     }
 
     let transactions = payload
@@ -97,7 +97,7 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
 
 /// Converts [`ExecutionPayloadV4`] to [Block]
 pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
-    let ExecutionPayloadV4 { payload_inner, deposit_requests, withdrawal_requests } = payload;
+    let ExecutionPayloadV4 { payload_inner, deposit_requests, withdrawal_requests, .. } = payload;
     let mut block = try_payload_v3_to_block(payload_inner)?;
 
     // attach requests with asc type identifiers
@@ -211,10 +211,10 @@ pub fn block_to_payload_v3(value: SealedBlock) -> (ExecutionPayloadV3, Option<B2
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV4`]
 pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
-    let (deposit_requests, withdrawal_requests) =
+    let (deposit_requests, withdrawal_requests, consolidation_requests) =
         value.requests.take().unwrap_or_default().into_iter().fold(
-            (Vec::new(), Vec::new()),
-            |(mut deposits, mut withdrawals), request| {
+            (Vec::new(), Vec::new(), Vec::new()),
+            |(mut deposits, mut withdrawals, mut consolidation_requests), request| {
                 match request {
                     Request::DepositRequest(r) => {
                         deposits.push(r);
@@ -222,10 +222,13 @@ pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
                     Request::WithdrawalRequest(r) => {
                         withdrawals.push(r);
                     }
+                    Request::ConsolidationRequest(r) => {
+                        consolidation_requests.push(r);
+                    }
                     _ => {}
                 };
 
-                (deposits, withdrawals)
+                (deposits, withdrawals, consolidation_requests)
             },
         );
 
@@ -233,6 +236,7 @@ pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
         deposit_requests,
         withdrawal_requests,
         payload_inner: block_to_payload_v3(value).0,
+        consolidation_requests,
     }
 }
 
@@ -349,7 +353,7 @@ pub fn validate_block_hash(
         return Err(PayloadError::BlockHash {
             execution: sealed_block.hash(),
             consensus: expected_block_hash,
-        })
+        });
     }
 
     Ok(sealed_block)
