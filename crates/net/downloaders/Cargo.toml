@@ -18,20 +18,23 @@ reth-consensus.workspace = true
 reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
-reth-db = { workspace = true }
 reth-db-api = { workspace = true, optional = true }
 reth-testing-utils = { workspace = true, optional = true }
 
-# eth
+# ethereum
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # async
 futures.workspace = true
 futures-util.workspace = true
 pin-project.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "fs", "io-util"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 
@@ -40,28 +43,28 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-tracing.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 
 tempfile = { workspace = true, optional = true }
 itertools.workspace = true
 
 # Bitfinity deps
 bitfinity-block-validator.workspace = true
+alloy-genesis.workspace = true
 candid.workspace = true
 did.workspace = true
 eyre.workspace = true
 ethereum-json-rpc-client.workspace = true
-evm-canister-client.workspace = true
 hex.workspace = true
-ic-agent.workspace = true
 ic-canister-client.workspace = true
 ic-cbor.workspace = true
 ic-certificate-verification.workspace = true
 ic-certification.workspace = true
 reth-chainspec.workspace = true
-rlp.workspace = true
+reth-node-api.workspace = true
+reth-provider.workspace = true
 serde_json.workspace = true
 backon.workspace = true
 
@@ -73,6 +76,7 @@ reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
+reth-trie-db.workspace = true
 reth-tracing.workspace = true
 
 assert_matches.workspace = true
@@ -84,11 +88,23 @@ rand.workspace = true
 tempfile.workspace = true
 
 [features]
+optimism = [
+	"reth-primitives/optimism",
+	"reth-db/optimism",
+	"reth-db-api?/optimism",
+	"reth-provider/optimism",
+]
+
 test-utils = [
-    "dep:tempfile",
-    "dep:reth-db-api",
-    "reth-db/test-utils",
-    "reth-consensus/test-utils",
-    "reth-network-p2p/test-utils",
-    "reth-testing-utils",
+	"tempfile",
+	"reth-db-api",
+	"reth-db/test-utils",
+	"reth-consensus/test-utils",
+	"reth-network-p2p/test-utils",
+	"reth-testing-utils",
+	"reth-chainspec/test-utils",
+	"reth-primitives/test-utils",
+	"reth-db-api?/test-utils",
+	"reth-provider/test-utils",
+	"reth-primitives-traits/test-utils",
 ]

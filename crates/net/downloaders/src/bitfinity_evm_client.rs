@@ -1,6 +1,9 @@
+use alloy_eips::BlockHashOrNumber;
+use alloy_genesis::{ChainConfig, Genesis, GenesisAccount};
+use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use bitfinity_block_validator::BitfinityBlockValidator;
 use candid::Principal;
-use did::certified::CertifiedResult;
+use did::{certified::CertifiedResult, error::EvmError};
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use eyre::Result;
 use ic_canister_client::IcAgentClient;
@@ -10,36 +13,36 @@ use ic_certification::{Certificate, HashTree, LookupResult};
 use itertools::Either;
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use reth_chainspec::{
-    BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks, ChainSpec, EthereumHardfork,
+    once_cell_set, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks, ChainSpec,
+    EthereumHardfork,
 };
 
 use alloy_rlp::Decodable;
-use reth_db::DatabaseEnv;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::RequestError,
-    headers::client::{HeadersClient, HeadersFut, HeadersRequest},
+    headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{
-    ruint::Uint, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainConfig, ForkCondition,
-    Genesis, GenesisAccount, Header, HeadersDirection, B256, U256,
-};
-use rlp::Encodable;
+use reth_node_api::NodeTypesWithDB;
+use reth_primitives::{BlockBody, ForkCondition, Header, TransactionSigned};
+use reth_provider::providers::ProviderNodeTypes;
 use serde_json::json;
 
 use std::{self, cmp::min, collections::HashMap};
-use std::{sync::Arc, time::Duration};
+use std::{sync::OnceLock, time::Duration};
 use thiserror::Error;
 
 use backon::{ExponentialBuilder, Retryable};
 
 use tracing::{debug, error, info, trace, warn};
 
+type EvmBlockValidator<DB> = BitfinityBlockValidator<IcAgentClient, DB>;
+
 /// RPC client configuration
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RpcClientConfig {
     /// Primary RPC URL
     pub primary_url: String,
@@ -49,19 +52,6 @@ pub struct RpcClientConfig {
     pub max_retries: u32,
     /// Delay between retries
     pub retry_delay: Duration,
-    /// Block validation client
-    pub evm_block_validator: Option<BitfinityBlockValidator<IcAgentClient, Arc<DatabaseEnv>>>,
-}
-
-impl std::fmt::Debug for RpcClientConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RpcClientConfig")
-            .field("primary_url", &self.primary_url)
-            .field("backup_url", &self.backup_url)
-            .field("max_retries", &self.max_retries)
-            .field("retry_delay", &self.retry_delay)
-            .finish()
-    }
 }
 
 /// Front-end API for fetching chain data from remote sources.
@@ -98,6 +88,10 @@ pub enum RemoteClientError {
     /// Error occurred when validating blocks on the evm
     #[error("EVM block validation error: {0}")]
     BlockValidationError(String),
+
+    /// EVM error
+    #[error(transparent)]
+    Evm(#[from] EvmError),
 }
 
 /// Setting for checking last certified block
@@ -111,19 +105,21 @@ pub struct CertificateCheckSettings {
 
 impl BitfinityEvmClient {
     /// `BitfinityEvmClient` from rpc url
-    pub async fn from_rpc_url(
+    pub async fn from_rpc_url<DB>(
         rpc_config: RpcClientConfig,
         start_block: u64,
         end_block: Option<u64>,
         batch_size: usize,
         max_blocks: u64,
         certificate_settings: Option<CertificateCheckSettings>,
-    ) -> Result<Self, RemoteClientError> {
+        evm_block_validator: Option<EvmBlockValidator<DB>>,
+    ) -> Result<Self, RemoteClientError>
+    where
+        DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
+    {
         let mut headers = HashMap::new();
         let mut hash_to_number = HashMap::new();
         let mut bodies = HashMap::new();
-
-        let evm_block_validator = rpc_config.evm_block_validator.clone();
 
         let provider = Self::client(rpc_config)
             .await
@@ -139,6 +135,8 @@ impl BitfinityEvmClient {
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
 
+        info!(target: "downloaders::bitfinity_evm_client", "Latest remote block: {latest_remote_block}");
+
         let mut end_block =
             min(end_block.unwrap_or(latest_remote_block), start_block + max_blocks - 1);
 
@@ -152,7 +150,7 @@ impl BitfinityEvmClient {
             let count = std::cmp::min(batch_size as u64, end_block + 1 - begin_block);
             let last_block = begin_block + count - 1;
 
-            debug!(target: "downloaders::bitfinity_evm_client", "Fetching blocks from {} to {}", begin_block, last_block);
+            info!(target: "downloaders::bitfinity_evm_client", "Fetching blocks from {} to {}", begin_block, last_block);
 
             let blocks_to_fetch = (begin_block..=last_block).map(Into::into).collect::<Vec<_>>();
 
@@ -171,33 +169,36 @@ impl BitfinityEvmClient {
                 .map(did::Block::<did::Transaction>::from)
                 .collect::<Vec<_>>();
 
-            trace!(target: "downloaders::bitfinity_evm_client", blocks = full_blocks.len(), "Fetched blocks");
+            info!(target: "downloaders::bitfinity_evm_client", blocks = full_blocks.len(), "Fetched blocks");
 
             for block in full_blocks {
                 let header =
-                    reth_primitives::Block::decode(&mut block.rlp_bytes().to_vec().as_slice())?;
+                    reth_primitives::Header::decode(&mut block.header_rlp_encoded().as_slice())?;
+
+                let reth_block = Self::did_block_to_reth_block(&block)?;
+
                 if let Some(block_checker) = &block_checker {
                     debug!("Checking block {}", block.number);
                     block_checker
-                        .check_block(&block, &header, evm_block_validator.as_ref())
+                        .check_block(&block, &reth_block, evm_block_validator.as_ref())
                         .await?;
                     debug!("block {} OK", block.number);
                 }
 
+                let mut body = reth_primitives::BlockBody::default();
+                for tx in block.transactions {
+                    let decoded_tx =
+                        TransactionSigned::decode(&mut tx.rlp_encoded_2718()?.to_vec().as_slice())?;
+                    body.transactions.push(decoded_tx);
+                }
+
                 let block_hash = header.hash_slow();
 
-                headers.insert(header.number, header.header.clone());
+                headers.insert(header.number, header.clone());
                 hash_to_number.insert(block_hash, header.number);
-                bodies.insert(
-                    block_hash,
-                    BlockBody {
-                        transactions: header.body,
-                        ommers: header.ommers,
-                        withdrawals: header.withdrawals,
-                        requests: header.requests,
-                    },
-                );
+                bodies.insert(block_hash, body);
             }
+            info!(target: "downloaders::bitfinity_evm_client", blocks = headers.len(), "Decoded blocks");
         }
 
         info!(blocks = headers.len(), "Initialized remote client");
@@ -292,10 +293,7 @@ impl BitfinityEvmClient {
                         k,
                         v
                     );
-                    (
-                        k.0.into(),
-                        GenesisAccount { balance: Uint::from_limbs(v.0), ..Default::default() },
-                    )
+                    (k.0, GenesisAccount { balance: v.0, ..Default::default() })
                 },
             );
 
@@ -312,7 +310,7 @@ impl BitfinityEvmClient {
             eip150_block: Some(0),
             eip155_block: Some(0),
             eip158_block: Some(0),
-            terminal_total_difficulty: Some(Uint::ZERO),
+            terminal_total_difficulty: Some(U256::ZERO),
             ..Default::default()
         };
 
@@ -320,9 +318,10 @@ impl BitfinityEvmClient {
 
         let spec = ChainSpec {
             chain,
-            genesis_hash: genesis_block.hash.map(|h| h.0.into()),
+            genesis_hash: once_cell_set(genesis_block.hash.0),
+            genesis_header: OnceLock::new(),
             genesis,
-            paris_block_and_final_difficulty: Some((0, Uint::ZERO)),
+            paris_block_and_final_difficulty: Some((0, U256::ZERO)),
             hardforks: ChainHardforks::new(vec![
                 (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
                 (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
@@ -343,6 +342,7 @@ impl BitfinityEvmClient {
             deposit_contract: None,
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: 0,
+            max_gas_limit: 0,
             bitfinity_evm_url: Some(rpc),
         };
 
@@ -377,7 +377,7 @@ impl BitfinityEvmClient {
 
         // Helper closure to create and test a client connection
         let try_connect = move |url: String| {
-            let backoff = backoff.clone();
+            let backoff = backoff;
             let client = EthJsonRpcClient::new(ReqwestClient::new(url));
 
             async move {
@@ -414,6 +414,30 @@ impl BitfinityEvmClient {
 
         Err(eyre::eyre!("Failed to connect to any RPC endpoint"))
     }
+
+    /// Convert [`did::Block`] to [`reth_primitives::Block`]
+    fn did_block_to_reth_block(
+        block: &did::Block<did::Transaction>,
+    ) -> Result<reth_primitives::Block, RemoteClientError> {
+        let header = reth_primitives::Header::decode(&mut block.header_rlp_encoded().as_slice())?;
+
+        let encoded_txs =
+            block.transactions.iter().map(|tx| tx.rlp_encoded_2718()).flatten().collect::<Vec<_>>();
+
+        let reth_txs = encoded_txs
+            .into_iter()
+            .map(|tx| TransactionSigned::decode(&mut tx.to_vec().as_slice()))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(reth_primitives::Block {
+            header,
+            body: reth_primitives::BlockBody {
+                transactions: reth_txs,
+                ommers: vec![],
+                withdrawals: None,
+            },
+        })
+    }
 }
 
 struct BlockCertificateChecker {
@@ -438,27 +462,22 @@ impl BlockCertificateChecker {
             .get_last_certified_block()
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
-        Ok(Self {
-            certified_data: CertifiedResult {
-                data: did::Block::from(certified_data.data),
-                certificate: certified_data.certificate,
-                witness: certified_data.witness,
-            },
-            evmc_principal,
-            ic_root_key,
-        })
+        Ok(Self { certified_data, evmc_principal, ic_root_key })
     }
 
     fn get_block_number(&self) -> u64 {
-        self.certified_data.data.number.0.as_u64()
+        self.certified_data.data.number.as_u64()
     }
 
-    async fn check_block(
+    async fn check_block<DB>(
         &self,
         block: &did::Block<did::Transaction>,
         reth_block: &reth_primitives::Block,
-        evm_block_validator: Option<&BitfinityBlockValidator<IcAgentClient, Arc<DatabaseEnv>>>,
-    ) -> Result<(), RemoteClientError> {
+        evm_block_validator: Option<&EvmBlockValidator<DB>>,
+    ) -> Result<(), RemoteClientError>
+    where
+        DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
+    {
         if block.number < self.certified_data.data.number {
             return Ok(());
         }
@@ -481,6 +500,7 @@ impl BlockCertificateChecker {
             Certificate::from_cbor(&self.certified_data.certificate).map_err(|e| {
                 RemoteClientError::CertificateError(format!("failed to parse certificate: {e}"))
             })?;
+
         certificate.verify(self.evmc_principal.as_ref(), &self.ic_root_key).map_err(|e| {
             RemoteClientError::CertificateError(format!("certificate validation error: {e}"))
         })?;
@@ -517,11 +537,14 @@ impl BlockCertificateChecker {
     }
 
     /// Validate block on the EVM
-    async fn validate_block(
-        validator: &BitfinityBlockValidator<IcAgentClient, Arc<DatabaseEnv>>,
+    async fn validate_block<DB>(
+        validator: &EvmBlockValidator<DB>,
         block: reth_primitives::Block,
         transactions: &[did::Transaction],
-    ) -> Result<(), RemoteClientError> {
+    ) -> Result<(), RemoteClientError>
+    where
+        DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
+    {
         tracing::debug!("Validating block {}", block.number);
 
         validator.validate_block(block, transactions).await.map_err(|e| {
@@ -532,6 +555,7 @@ impl BlockCertificateChecker {
 
 impl HeadersClient for BitfinityEvmClient {
     type Output = HeadersFut;
+    type Header = Header;
 
     fn get_headers_with_priority(
         &self,
@@ -582,6 +606,7 @@ impl HeadersClient for BitfinityEvmClient {
 
 impl BodiesClient for BitfinityEvmClient {
     type Output = BodiesFut;
+    type Body = BlockBody;
 
     fn get_block_bodies_with_priority(
         &self,
@@ -622,22 +647,41 @@ impl DownloadClient for BitfinityEvmClient {
 
 #[cfg(test)]
 mod tests {
+    use reth_node_api::NodeTypes;
+    use reth_primitives::EthPrimitives;
+    use reth_storage_api::EthStorage;
+    use reth_trie_db::MerklePatriciaTrie;
+
     use super::*;
+
+    #[derive(Clone)]
+    struct DummyDb;
+
+    impl NodeTypesWithDB for DummyDb {
+        type DB = std::sync::Arc<reth_db::DatabaseEnv>;
+    }
+
+    impl NodeTypes for DummyDb {
+        type Primitives = EthPrimitives;
+        type ChainSpec = ChainSpec;
+        type StateCommitment = MerklePatriciaTrie;
+        type Storage = EthStorage;
+    }
 
     #[tokio::test]
     async fn bitfinity_remote_client_from_rpc_url() {
-        let client = BitfinityEvmClient::from_rpc_url(
+        let client = BitfinityEvmClient::from_rpc_url::<DummyDb>(
             RpcClientConfig {
                 primary_url: "https://cloudflare-eth.com".to_string(),
                 backup_url: None,
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
-                evm_block_validator: None,
             },
             0,
             Some(5),
             5,
             1000,
+            None,
             None,
         )
         .await
@@ -647,18 +691,18 @@ mod tests {
 
     #[tokio::test]
     async fn bitfinity_remote_client_from_backup_rpc_url() {
-        let client = BitfinityEvmClient::from_rpc_url(
+        let client = BitfinityEvmClient::from_rpc_url::<DummyDb>(
             RpcClientConfig {
                 primary_url: "https://cloudflare.com".to_string(),
                 backup_url: Some("https://cloudflare-eth.com".to_string()),
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
-                evm_block_validator: None,
             },
             0,
             Some(5),
             5,
             1000,
+            None,
             None,
         )
         .await
@@ -668,18 +712,18 @@ mod tests {
 
     #[tokio::test]
     async fn bitfinity_test_headers_client() {
-        let client = BitfinityEvmClient::from_rpc_url(
+        let client = BitfinityEvmClient::from_rpc_url::<DummyDb>(
             RpcClientConfig {
                 primary_url: "https://cloudflare-eth.com".to_string(),
                 backup_url: None,
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
-                evm_block_validator: None,
             },
             0,
             Some(5),
             5,
             1000,
+            None,
             None,
         )
         .await
@@ -700,18 +744,18 @@ mod tests {
 
     #[tokio::test]
     async fn bitfinity_test_bodies_client() {
-        let client = BitfinityEvmClient::from_rpc_url(
+        let client = BitfinityEvmClient::from_rpc_url::<DummyDb>(
             RpcClientConfig {
                 primary_url: "https://cloudflare-eth.com".to_string(),
                 backup_url: None,
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
-                evm_block_validator: None,
             },
             0,
             Some(5),
             5,
             1000,
+            None,
             None,
         )
         .await

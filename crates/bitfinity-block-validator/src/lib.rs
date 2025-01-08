@@ -1,20 +1,29 @@
 //! Bitfinity block validator.
 
+use alloy_primitives::Address;
+use alloy_primitives::U256;
 use did::unsafe_blocks::ValidateUnsafeBlockArgs;
 use did::{Transaction, H256};
 use evm_canister_client::{CanisterClient, EvmCanisterClient};
 use itertools::Itertools;
-use reth_db::database::Database;
-use reth_engine_tree::tree::MemoryOverlayStateProvider;
+use reth_chain_state::MemoryOverlayStateProvider;
+use reth_evm::execute::BasicBlockExecutor;
+use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm::execute::Executor as _;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider as _};
-use reth_evm_ethereum::execute::EthExecutorProvider;
-use reth_evm_ethereum::{execute::EthBlockExecutor, EthEvmConfig};
-use reth_primitives::U256;
-use reth_primitives::{Address, Receipt};
+use reth_evm_ethereum::execute::EthExecutionStrategy;
+use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
+use reth_evm_ethereum::EthEvmConfig;
+use reth_node_types::NodeTypesWithDB;
+use reth_primitives::Receipt;
 use reth_primitives::{Block, BlockWithSenders};
-use reth_provider::{ChainSpecProvider as _, ExecutionOutcome, ProviderFactory, StateProvider};
+use reth_provider::providers::ProviderNodeTypes;
+use reth_provider::HashedPostStateProvider as _;
+use reth_provider::LatestStateProviderRef;
+use reth_provider::{ChainSpecProvider as _, ExecutionOutcome, ProviderFactory};
 use reth_revm::database::StateProviderDatabase;
+use reth_trie::StateRoot;
+use reth_trie_db::DatabaseStateRoot;
 
 /// Block validator for Bitfinity.
 ///
@@ -24,6 +33,7 @@ use reth_revm::database::StateProviderDatabase;
 pub struct BitfinityBlockValidator<C, DB>
 where
     C: CanisterClient,
+    DB: NodeTypesWithDB + Clone,
 {
     evm_client: EvmCanisterClient<C>,
     provider_factory: ProviderFactory<DB>,
@@ -32,7 +42,7 @@ where
 impl<C, DB> BitfinityBlockValidator<C, DB>
 where
     C: CanisterClient,
-    DB: Database,
+    DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
 {
     /// Create a new [`BitfinityBlockValidator`].
     pub fn new(evm_client: EvmCanisterClient<C>, provider_factory: ProviderFactory<DB>) -> Self {
@@ -124,7 +134,8 @@ where
 
     /// Calculate the transactions root.
     fn calculate_transactions_root(&self, block: &BlockWithSenders) -> H256 {
-        let calculated_root = reth_primitives::proofs::calculate_transaction_root(&block.body);
+        let calculated_root =
+            reth_primitives::proofs::calculate_transaction_root(&block.block.body.transactions);
         H256::from_slice(calculated_root.as_ref())
     }
 
@@ -154,8 +165,13 @@ where
                 return Err(Box::new(err));
             }
         };
-        let calculated_state_root =
-            execution_outcome.hash_state_slow().state_root_with_updates(provider.tx_ref())?.0;
+
+        let state_provider = LatestStateProviderRef::new(&provider);
+        let calculated_state_root = StateRoot::overlay_root_with_updates(
+            provider.tx_ref(),
+            state_provider.hashed_post_state(execution_outcome.state()),
+        )?
+        .0;
 
         Ok(H256::from_slice(calculated_state_root.as_ref()))
     }
@@ -195,14 +211,18 @@ where
     /// Get the block executor for the latest block.
     fn executor(
         &self,
-    ) -> EthBlockExecutor<
-        EthEvmConfig,
-        StateProviderDatabase<MemoryOverlayStateProvider<Box<dyn StateProvider>>>,
+    ) -> BasicBlockExecutor<
+        EthExecutionStrategy<
+            StateProviderDatabase<MemoryOverlayStateProvider<reth_primitives::EthPrimitives>>,
+            EthEvmConfig,
+        >,
     > {
         let historical = self.provider_factory.latest().expect("no latest provider");
 
-        let db = MemoryOverlayStateProvider::new(Vec::new(), historical);
-        let executor = EthExecutorProvider::ethereum(self.provider_factory.chain_spec());
+        let db = MemoryOverlayStateProvider::new(historical, Vec::new());
+        let executor = BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::ethereum(
+            self.provider_factory.chain_spec(),
+        ));
         executor.executor(StateProviderDatabase::new(db))
     }
 }

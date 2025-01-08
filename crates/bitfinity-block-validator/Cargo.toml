@@ -11,17 +11,23 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alloy-primitives.workspace = true
 async-trait.workspace = true
 did.workspace = true
 evm-canister-client.workspace = true
 ic-agent.workspace = true
 ic-canister-client.workspace = true
 itertools.workspace = true
+reth-chain-state.workspace = true
+reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-engine-tree.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
+reth-node-types.workspace = true
 reth-provider.workspace = true
 reth-primitives.workspace = true
 reth-revm.workspace = true
+reth-trie.workspace = true
+reth-trie-db.workspace = true
 tracing.workspace = true

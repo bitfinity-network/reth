@@ -94,12 +94,12 @@ pub struct BitfinityResetEvmStateArgs {
     /// Network url
     /// This is the URL of the IC network.
     /// E.g.
-    /// - https://ic0.app
-    /// - http://127.0.0.1:3333
+    /// - <https://ic0.app>
+    /// - <http://127.0.0.1:3333>
     #[arg(long)]
     pub evm_network: String,
 
-    /// URL used to fetch the ChainSpec information.
+    /// URL used to fetch the `ChainSpec` information.
     /// This is usually the URL of the Bitfinity EVM block extractor.
     #[arg(long)]
     pub evm_datasource_url: String,
@@ -107,4 +107,12 @@ pub struct BitfinityResetEvmStateArgs {
     /// Number of parallel requests to send data to the IC.
     #[arg(long, default_value = "4")]
     pub parallel_requests: usize,
+
+    /// Max size in bytes of a single request to the IC.
+    #[arg(long, default_value = "500000")]
+    pub max_request_bytes: usize,
+
+    /// Single accounts bigger than this value will be split in multiple requests.
+    #[arg(long, default_value = "500000")]
+    pub max_account_request_bytes: usize,
 }
