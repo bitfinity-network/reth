@@ -31,3 +31,16 @@ reth-revm.workspace = true
 reth-trie.workspace = true
 reth-trie-db.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+alloy-consensus.workspace = true
+alloy-genesis.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
+async-trait.workspace = true
+candid.workspace = true
+ethereum-json-rpc-client = { workspace = true, features = ["reqwest"] }
+reth-db-common.workspace = true
+tokio.workspace = true
+serde.workspace = true
+tempfile.workspace = true

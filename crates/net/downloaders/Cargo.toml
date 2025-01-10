@@ -21,6 +21,7 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
+reth-db = { workspace = true }
 reth-db-api = { workspace = true, optional = true }
 reth-testing-utils = { workspace = true, optional = true }
 

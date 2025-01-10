@@ -1736,9 +1736,15 @@ checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
 name = "bitfinity-block-validator"
 version = "1.1.4"
 dependencies = [
+ "alloy-consensus 0.7.3",
+ "alloy-genesis 0.7.3",
  "alloy-primitives",
+ "alloy-signer 0.7.3",
+ "alloy-signer-local",
  "async-trait",
+ "candid",
  "did",
+ "ethereum-json-rpc-client",
  "evm-canister-client",
  "ic-agent",
  "ic-canister-client",
@@ -1746,6 +1752,7 @@ dependencies = [
  "reth-chain-state",
  "reth-chainspec",
  "reth-db",
+ "reth-db-common",
  "reth-engine-tree",
  "reth-evm",
  "reth-evm-ethereum",
@@ -1755,6 +1762,9 @@ dependencies = [
  "reth-revm",
  "reth-trie",
  "reth-trie-db",
+ "serde",
+ "tempfile",
+ "tokio",
  "tracing",
 ]
 
@@ -7974,6 +7984,7 @@ dependencies = [
  "reth-downloaders",
  "reth-ecies",
  "reth-eth-wire",
+ "reth-ethereum-cli",
  "reth-evm",
  "reth-exex",
  "reth-fs-util",
