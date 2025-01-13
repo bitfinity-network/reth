@@ -16,6 +16,7 @@ use reth_cli_commands::{
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+use reth_network::EthNetworkPrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
@@ -169,9 +170,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<EthereumNode, _, _>(ctx, EthExecutorProvider::ethereum)
+                command.execute::<EthereumNode, _, _, EthNetworkPrimitives>(
+                    ctx,
+                    EthExecutorProvider::ethereum,
+                )
             }),
-            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::P2P(command) => {
+                runner.run_until_ctrl_c(command.execute::<EthNetworkPrimitives>())
+            }
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
@@ -182,6 +188,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
                 runner.run_command_until_exit(|ctx| command.execute::<EthereumNode>(ctx))
             }
             Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<EthereumNode>()),
+            Commands::BitfinityResetEvmState(builder) => runner
+                .run_until_ctrl_c(async move { builder.build().await.unwrap().execute().await }),
         }
     }
 
@@ -237,6 +245,12 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
     Prune(prune::PruneCommand<C>),
+
+    /// Export state to EVM canister
+    #[command(name = "bitfinity-reset-evm-state")]
+    BitfinityResetEvmState(
+        crate::commands::bitfinity_reset_evm_state::BitfinityResetEvmStateCommandBuilder,
+    ),
 }
 
 #[cfg(test)]

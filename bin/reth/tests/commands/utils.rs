@@ -1,5 +1,6 @@
-//! Bitfinity integration tests utils.
-
+//!
+//! Utils for bitfinity integration tests
+//!
 use std::{
     fmt::{Debug, Display, Formatter},
     path::PathBuf,
@@ -23,9 +24,7 @@ use reth_chainspec::ChainSpec;
 use reth_db::{init_db, DatabaseEnv};
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
 use reth_errors::BlockExecutionError;
-use reth_evm::execute::{
-    BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
-};
+use reth_evm::execute::{BatchExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
@@ -39,17 +38,13 @@ use revm_primitives::db::Database;
 use tempfile::TempDir;
 use tracing::{debug, info};
 
-/// Local evm canister for tests.
+/// Local EVM canister ID for testing.
 pub const LOCAL_EVM_CANISTER_ID: &str = "bkyz2-fmaaa-aaaaa-qaaaq-cai";
 /// EVM block extractor for devnet running on Digital Ocean.
 pub const DEFAULT_EVM_DATASOURCE_URL: &str =
     "https://block-extractor-testnet-1052151659755.europe-west9.run.app";
 
-/// EVM block extractor for devnet running on Digital Ocean.
-pub const DEFAULT_EVM_DATASOURCE_URL: &str =
-    "https://block-extractor-testnet-1052151659755.europe-west9.run.app";
-
-/// Initialize logger.
+/// Initializes the logs for the tests.
 pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
     let mut tracer = RethTracer::new();
     let stdout = LayerInfo::new(
@@ -64,20 +59,23 @@ pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
     Ok(guard)
 }
 
+/// Type alias for the node types.
 pub type NodeTypes = NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>;
 
 #[derive(Clone)]
+/// Data needed for the import tests.
 pub struct ImportData {
-    /// Chain config.
+    /// The chain spec.
     pub chain: Arc<ChainSpec>,
-
-    /// Path to data.
+    /// The data directory.
     pub data_dir: ChainPath<DataDirPath>,
-
-    /// Database config.
+    /// The database.
     pub database: Arc<DatabaseEnv>,
+    /// The provider factory.
     pub provider_factory: ProviderFactory<NodeTypes>,
+    /// The blockchain provider.
     pub blockchain_db: BlockchainProvider<NodeTypes>,
+    /// The bitfinity import arguments.
     pub bitfinity_args: BitfinityImportArgs,
 }
 
@@ -202,7 +200,7 @@ pub async fn wait_until_local_block_imported(
     }
 }
 
-/// Returns local port of dfx replica.
+/// Returns the local dfx port.
 pub fn get_dfx_local_port() -> u16 {
     use std::process::Command;
     let output = Command::new("dfx")
@@ -246,7 +244,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
 }
 
 impl<DB> Executor<DB> for MockExecutorProvider {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Input<'a> = &'a BlockWithSenders;
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
@@ -292,7 +290,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
 }
 
 impl<DB> BatchExecutor<DB> for MockExecutorProvider {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Input<'a> = &'a BlockWithSenders;
     type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 

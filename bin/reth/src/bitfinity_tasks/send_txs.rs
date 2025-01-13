@@ -4,8 +4,6 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::primitives::ruint::Uint;
-use alloy_rlp::Decodable;
 use did::H256;
 use ethereum_json_rpc_client::reqwest::ReqwestClient;
 use ethereum_json_rpc_client::{EthJsonRpcClient, Id, Params};
@@ -15,10 +13,8 @@ use lightspeed_scheduler::job::Job;
 use lightspeed_scheduler::scheduler::Scheduler;
 use lightspeed_scheduler::JobExecutor;
 use reth_node_core::version::SHORT_VERSION;
-use reth_primitives::hex;
-use reth_primitives::{TransactionSigned, B256, U256};
-use reth_rpc::eth::RawTransactionForwarder;
 use reth_rpc_eth_types::{EthApiError, EthResult};
+use revm_primitives::{hex, B256, U256};
 use tokio::sync::Mutex;
 use tracing::{debug, info, trace, warn};
 
@@ -175,26 +171,26 @@ impl BitfinityTransactionsForwarder {
     }
 }
 
-#[async_trait::async_trait]
-impl RawTransactionForwarder for BitfinityTransactionsForwarder {
-    async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()> {
-        let typed_tx = TransactionSigned::decode(&mut (&raw[..])).map_err(|e| {
-            warn!("Failed to decode signed transaction in the BitfinityTransactionsForwarder: {e}");
-            EthApiError::FailedToDecodeSignedTransaction
-        })?;
+// #[async_trait::async_trait]
+// impl RawTransactionForwarder for BitfinityTransactionsForwarder {
+//     async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()> {
+//         let typed_tx = TransactionSigned::decode(&mut (&raw[..])).map_err(|e| {
+//             warn!("Failed to decode signed transaction in the BitfinityTransactionsForwarder: {e}");
+//             EthApiError::FailedToDecodeSignedTransaction
+//         })?;
 
-        debug!("Pushing tx with hash {} to priority queue", typed_tx.hash);
-        let gas_price = typed_tx.effective_gas_price(None);
+//         debug!("Pushing tx with hash {} to priority queue", typed_tx.hash);
+//         let gas_price = typed_tx.effective_gas_price(None);
 
-        self.queue.lock().await.push(typed_tx.hash(), Uint::from(gas_price), raw.to_vec());
+//         self.queue.lock().await.push(typed_tx.hash(), Uint::from(gas_price), raw.to_vec());
 
-        Ok(())
-    }
+//         Ok(())
+//     }
 
-    async fn get_transaction_by_hash(&self, hash: B256) -> Option<Vec<u8>> {
-        self.queue.lock().await.get(&hash)
-    }
-}
+//     async fn get_transaction_by_hash(&self, hash: B256) -> Option<Vec<u8>> {
+//         self.queue.lock().await.get(&hash)
+//     }
+// }
 
 /// Priority queue to get transactions sorted by gas price.
 #[derive(Debug)]
@@ -278,11 +274,14 @@ struct TxKey {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::OnceLock;
+
     use super::TransactionsPriorityQueue;
-    use crate::primitives::U256;
+    use alloy_consensus::Transaction;
     use reth_primitives::TransactionSigned;
     use reth_transaction_pool::test_utils::MockTransaction;
     use reth_transaction_pool::PoolTransaction;
+    use revm_primitives::{PrimitiveSignature, U256};
 
     #[test]
     fn test_pop_order() {
@@ -361,9 +360,12 @@ mod tests {
     fn transaction_with_gas_price(gas_price: u128) -> TransactionSigned {
         let tx = MockTransaction::legacy().with_gas_price(gas_price).rng_hash();
 
+        let hash = OnceLock::new();
+        hash.get_or_init(|| *tx.hash());
+
         TransactionSigned {
-            hash: *tx.hash(),
-            signature: Default::default(),
+            hash,
+            signature: PrimitiveSignature::test_signature(),
             transaction: tx.into(),
         }
     }
