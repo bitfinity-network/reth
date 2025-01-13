@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 async-trait.workspace = true
 did.workspace = true

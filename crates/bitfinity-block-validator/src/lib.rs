@@ -1,7 +1,6 @@
 //! Bitfinity block validator.
 
 use alloy_primitives::Address;
-use alloy_primitives::U256;
 use did::unsafe_blocks::ValidateUnsafeBlockArgs;
 use did::{Transaction, H256};
 use evm_canister_client::{CanisterClient, EvmCanisterClient};
@@ -73,7 +72,7 @@ where
         let executor = self.executor();
         let block_with_senders = Self::convert_block(block, transactions);
 
-        let output = match executor.execute((&block_with_senders, U256::MAX).into()) {
+        let output = match executor.execute(&block_with_senders) {
             Ok(output) => output,
             Err(err) => {
                 tracing::error!("Failed to execute block: {err:?}");
@@ -224,9 +223,9 @@ mod test {
         sync::Arc,
     };
 
-    use alloy_consensus::TxEip1559;
+    use alloy_consensus::{proofs::calculate_transaction_root, TxEip1559};
     use alloy_genesis::{Genesis, GenesisAccount};
-    use alloy_primitives::{FixedBytes, B256};
+    use alloy_primitives::{FixedBytes, B256, U256};
     use alloy_signer::SignerSync;
     use alloy_signer_local::PrivateKeySigner;
     use candid::utils::ArgumentEncoder;
@@ -235,7 +234,7 @@ mod test {
     use reth_chainspec::{Chain, ChainSpec, EthereumHardfork, ForkCondition, MIN_TRANSACTION_GAS};
     use reth_db::init_db;
     use reth_node_types::NodeTypes;
-    use reth_primitives::{EthPrimitives, RecoveredTx, TransactionSigned};
+    use reth_primitives::{Account, EthPrimitives, RecoveredTx, TransactionSigned};
     use reth_provider::{providers::StaticFileProvider, EthStorage};
     use reth_trie::EMPTY_ROOT_HASH;
     use reth_trie_db::MerklePatriciaTrie;
@@ -245,6 +244,7 @@ mod test {
 
     const CHAIN_ID: u64 = 1;
     const INITIAL_BASE_FEE: u64 = 1_000_000_000;
+    const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
 
     #[derive(Clone)]
     struct DummyDb;
@@ -351,7 +351,7 @@ mod test {
         let tx_cost = U256::from(INITIAL_BASE_FEE * MIN_TRANSACTION_GAS);
         let num_tx = 5;
 
-        let mock_tx = |nonce: u64| -> RecoveredTx {
+        let mock_tx = |nonce: u64| -> RecoveredTx<_> {
             let tx = reth_primitives::Transaction::Eip1559(TxEip1559 {
                 chain_id: CHAIN_ID,
                 nonce,
@@ -368,7 +368,7 @@ mod test {
         };
         let signer_balance_decrease = tx_cost * U256::from(num_tx);
         let initial_signer_balance = U256::from(10).pow(U256::from(18));
-        let transactions: Vec<RecoveredTx> = (0..num_tx).map(mock_tx).collect();
+        let transactions: Vec<RecoveredTx<_>> = (0..num_tx).map(mock_tx).collect();
 
         let receipts = transactions
             .iter()
@@ -384,28 +384,28 @@ mod test {
             })
             .collect::<Vec<_>>();
 
+        let signed_body =
+            transactions.clone().into_iter().map(|tx| tx.into_tx()).collect::<Vec<_>>();
+        let transactions_root = calculate_transaction_root(&signed_body);
+
         let header = reth_primitives::Header {
             number: 1,
             parent_hash: FixedBytes::new([0; 32]),
             gas_used: transactions.len() as u64 * MIN_TRANSACTION_GAS,
-            gas_limit: ChainSpec::default().max_gas_limit,
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             mix_hash: B256::ZERO,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
-            transactions_root: alloy_consensus::proofs::calculate_transaction_root(
-                &transactions.clone().into_iter().map(|tx| tx.into_signed()).collect::<Vec<_>>(),
-            ),
+            transactions_root,
             receipts_root: alloy_consensus::proofs::calculate_receipt_root(&receipts),
             beneficiary: signer,
             state_root: reth_trie::root::state_root_unhashed(HashMap::from([(
                 signer,
-                (
-                    reth_revm::primitives::AccountInfo {
-                        balance: initial_signer_balance - signer_balance_decrease,
-                        nonce: num_tx,
-                        ..Default::default()
-                    },
-                    EMPTY_ROOT_HASH,
-                ),
+                Account {
+                    balance: initial_signer_balance - signer_balance_decrease,
+                    nonce: num_tx,
+                    ..Default::default()
+                }
+                .into_trie_account(EMPTY_ROOT_HASH),
             )])),
             // use the number as the timestamp so it is monotonically increasing
             timestamp: 0,
@@ -419,7 +419,7 @@ mod test {
         reth_primitives::Block {
             header,
             body: reth_primitives::BlockBody {
-                transactions: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
+                transactions: signed_body,
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
             },
