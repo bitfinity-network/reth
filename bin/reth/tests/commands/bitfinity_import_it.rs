@@ -117,13 +117,7 @@ async fn bitfinity_test_should_import_data_from_evm_with_backup_rpc_url() {
     import_data.bitfinity_args.batch_size = (end_block as usize) * 10;
 
     // Act
-<<<<<<< HEAD
-    import_blocks(import_data.clone(), Duration::from_secs(120), false).await;
-||||||| 0e2237228
-    import_blocks(import_data.clone(), Duration::from_secs(20), false).await;
-=======
     import_blocks(import_data.clone(), Duration::from_secs(200), false).await;
->>>>>>> bitfinity-archive-node
 
     // Assert
     {

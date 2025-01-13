@@ -521,7 +521,10 @@ where
             .map(|tx| tx.into_transaction(self.tx_resp_builder()))
             .transpose()?;
         if tx_opt.is_none() {
-            tx_opt = BitfinityEvmRpc::transaction_by_hash(self, hash).await?.map(|tx| tx.into());
+            tx_opt = BitfinityEvmRpc::transaction_by_hash(self, hash)
+                .await?
+                .map(|tx| tx.into_transaction(self.tx_resp_builder()))
+                .transpose()?;
         }
 
         Ok(tx_opt)

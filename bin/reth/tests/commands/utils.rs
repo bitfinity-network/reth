@@ -41,15 +41,9 @@ use tracing::{debug, info};
 
 /// Local evm canister for tests.
 pub const LOCAL_EVM_CANISTER_ID: &str = "bkyz2-fmaaa-aaaaa-qaaaq-cai";
-<<<<<<< HEAD
-||||||| 0e2237228
-/// EVM block extractor for devnet running on Digital Ocean.
-pub const DEFAULT_EVM_DATASOURCE_URL: &str = "https://orca-app-5yyst.ondigitalocean.app";
-=======
 /// EVM block extractor for devnet running on Digital Ocean.
 pub const DEFAULT_EVM_DATASOURCE_URL: &str =
     "https://block-extractor-testnet-1052151659755.europe-west9.run.app";
->>>>>>> bitfinity-archive-node
 
 /// EVM block extractor for devnet running on Digital Ocean.
 pub const DEFAULT_EVM_DATASOURCE_URL: &str =
@@ -70,13 +64,8 @@ pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
     Ok(guard)
 }
 
-<<<<<<< HEAD
-/// Bitfinity config for reth node.
-||||||| 0e2237228
-=======
 pub type NodeTypes = NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>;
 
->>>>>>> bitfinity-archive-node
 #[derive(Clone)]
 pub struct ImportData {
     /// Chain config.
@@ -87,22 +76,8 @@ pub struct ImportData {
 
     /// Database config.
     pub database: Arc<DatabaseEnv>,
-<<<<<<< HEAD
-
-    /// Database provider.
-    pub provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
-
-    /// Blockchain provider.
-    pub blockchain_db: BlockchainProvider<Arc<DatabaseEnv>>,
-
-    /// Bitfinity import config.
-||||||| 0e2237228
-    pub provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
-    pub blockchain_db: BlockchainProvider<Arc<DatabaseEnv>>,
-=======
     pub provider_factory: ProviderFactory<NodeTypes>,
     pub blockchain_db: BlockchainProvider<NodeTypes>,
->>>>>>> bitfinity-archive-node
     pub bitfinity_args: BitfinityImportArgs,
 }
 

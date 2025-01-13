@@ -555,12 +555,15 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         >,
     > + Send {
         async move {
-            Ok(self.transaction_by_hash(transaction_hash).await?.map(|tx| match tx {
-                tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
-                tx @ TransactionSource::Block { block_hash, .. } => {
-                    (tx, BlockId::Hash(block_hash.into()))
-                }
-            }))
+            // Ok(self.transaction_by_hash(transaction_hash).await?.map(|tx| match tx {
+            Ok(<Self as LoadTransaction>::transaction_by_hash(self, transaction_hash).await?.map(
+                |tx| match tx {
+                    tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
+                    tx @ TransactionSource::Block { block_hash, .. } => {
+                        (tx, BlockId::Hash(block_hash.into()))
+                    }
+                },
+            ))
         }
     }
 

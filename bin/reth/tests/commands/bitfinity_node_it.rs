@@ -23,14 +23,6 @@ use reth::{
 use reth_consensus::FullConsensus;
 use reth_db::DatabaseEnv;
 use reth_db::{init_db, test_utils::tempdir_path};
-<<<<<<< HEAD
-use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
-use reth_node_ethereum::EthereumNode;
-use reth_primitives::{sign_message, Transaction, TransactionSigned};
-||||||| 0e2237228
-use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
-use reth_node_ethereum::EthereumNode;
-=======
 use reth_network::NetworkHandle;
 use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
 use reth_node_builder::components::Components;
@@ -42,22 +34,13 @@ use reth_node_ethereum::{
 };
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc::EthApi;
->>>>>>> bitfinity-archive-node
 use reth_tasks::TaskManager;
-<<<<<<< HEAD
-use reth_transaction_pool::test_utils::MockTransaction;
-use revm_primitives::{Address, B256, U256};
-use std::time::Duration;
-||||||| 0e2237228
-use revm_primitives::{Address, U256};
-=======
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::{
     CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool,
     TransactionValidationTaskExecutor,
 };
 use revm_primitives::{hex, Address, U256};
->>>>>>> bitfinity-archive-node
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
@@ -230,26 +213,14 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     .await;
 
     // Create a random transaction
-<<<<<<< HEAD
-    let tx = transaction_with_gas_price(100);
-    let encoded = alloy_rlp::encode(&tx);
-    let expected_tx_hash = keccak::keccak_hash(&encoded);
-||||||| 0e2237228
-    let mut tx = [0u8; 256];
-    rand::thread_rng().fill_bytes(&mut tx);
-    let expected_tx_hash =
-        keccak::keccak_hash(format!("0x{}", reth_primitives::hex::encode(tx)).as_bytes());
-=======
     let mut tx = [0u8; 256];
     rand::thread_rng().fill_bytes(&mut tx);
     let expected_tx_hash = keccak::keccak_hash(format!("0x{}", hex::encode(tx)).as_bytes());
->>>>>>> bitfinity-archive-node
 
     // Act
     let result = reth_client.send_raw_transaction_bytes(&encoded).await.unwrap();
 
     // Assert
-<<<<<<< HEAD
     assert_eq!(result.to_fixed_bytes(), expected_tx_hash.0.to_fixed_bytes());
 
     let transaction_sending = BitfinityTransactionSender::new(
@@ -404,12 +375,8 @@ fn sign_tx_with_random_key_pair(tx: Transaction) -> TransactionSigned {
 fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
     let signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
-    TransactionSigned::from_transaction_and_signature(tx, signature)
-||||||| 0e2237228
-    assert_eq!(result.unwrap(), expected_tx_hash.0);
-=======
+    TransactionSigned::from_transaction_and_signature(tx, signature);
     assert_eq!(result.unwrap(), expected_tx_hash);
->>>>>>> bitfinity-archive-node
 }
 
 /// Start a local reth node
@@ -567,21 +534,10 @@ async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle, So
 
 /// Eth server mock utils.
 pub mod eth_server {
-<<<<<<< HEAD
-    use alloy_rlp::{Bytes, Decodable};
-    use discv5::enr::secp256k1::{Keypair, Secp256k1};
-    use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
-||||||| 0e2237228
-
-    use alloy_rlp::Bytes;
-    use did::keccak;
-    use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
-=======
 
     use alloy_rlp::Bytes;
     use did::keccak;
     use ethereum_json_rpc_client::CertifiedResult;
->>>>>>> bitfinity-archive-node
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
     use reth_primitives::{sign_message, TransactionSigned};
     use reth_rpc_types::{Signature, Transaction};
@@ -612,16 +568,9 @@ pub mod eth_server {
 
         /// Returns getLastCertifiedBlock
         #[method(name = "getLastCertifiedBlock", aliases = ["ic_getLastCertifiedBlock"])]
-<<<<<<< HEAD
-        async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>>;
-||||||| 0e2237228
-        async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>>;
-
-=======
         async fn get_last_certified_block(
             &self,
         ) -> RpcResult<CertifiedResult<did::Block<did::H256>>>;
->>>>>>> bitfinity-archive-node
     }
 
     /// Eth server mock.
@@ -711,9 +660,9 @@ pub mod eth_server {
             let signature =
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.hash).unwrap();
             tx.signature = Some(Signature {
-                r: signature.r,
-                s: signature.s,
-                v: U256::from(signature.v(None)),
+                r: signature.r(),
+                s: signature.s(),
+                v: U256::from(signature.v()),
                 y_parity: None,
             });
 
@@ -728,19 +677,9 @@ pub mod eth_server {
             ])
         }
 
-<<<<<<< HEAD
-        async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>> {
-||||||| 0e2237228
-        async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>> {
-            Ok(CertifiedResult { 
-                data: Default::default(), 
-                witness: vec![], 
-                certificate: vec![1u8, 3, 11] 
-=======
         async fn get_last_certified_block(
             &self,
         ) -> RpcResult<CertifiedResult<did::Block<did::H256>>> {
->>>>>>> bitfinity-archive-node
             Ok(CertifiedResult {
                 data: Default::default(),
                 witness: vec![],
