@@ -69,7 +69,10 @@ fn main() {
                 warn!(target: "reth::cli", "Experimental engine is default now, and the --engine.experimental flag is deprecated. To enable the legacy functionality, use --engine.legacy.");
             }
 
-            let use_legacy_engine = engine_args.legacy;
+            // let use_legacy_engine = engine_args.legacy;
+            // Bitfinity import is implemented only for the legacy engine
+            let use_legacy_engine = true;
+
             match use_legacy_engine {
                 false => {
                     let engine_tree_config = TreeConfig::default()
@@ -97,7 +100,7 @@ fn main() {
                     let config = handle.node.config.config.clone();
                     let chain = handle.node.chain_spec();
                     let datadir = handle.node.data_dir.clone();
-                    let (provider_factory, bitfinity) = handle.bitfinity_import.clone().expect("Bitfinity import not configured");            
+                    let (provider_factory, bitfinity) = handle.bitfinity_import.clone().expect("Bitfinity import not configured");
 
                     // Init bitfinity import
                     {
@@ -111,7 +114,7 @@ fn main() {
                         );
                         let _import_handle = import.schedule_execution().await?;
                     };
-                    
+
                     handle.node_exit_future.await
                 }
             }
