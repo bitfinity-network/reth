@@ -1,12 +1,13 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
+use bitfinity_tx_forwarder::BitfinityTransactionsForwarder;
 use derive_more::Deref;
 use reth_primitives::NodePrimitives;
 use reth_provider::{
@@ -50,7 +51,9 @@ pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig> {
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
     /// Transaction RPC response builder.
     pub tx_resp_builder: EthTxBuilder,
-    // pub bitfinity_tx_forwarder: Option<()>,
+
+    /// Bitfinity transaction forwarder.
+    pub bitfinity_tx_forwarder: OnceLock<BitfinityTransactionsForwarder>,
 }
 
 impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig>
@@ -58,7 +61,11 @@ where
     Provider: BlockReader,
 {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone(), tx_resp_builder: EthTxBuilder }
+        Self {
+            inner: self.inner.clone(),
+            tx_resp_builder: EthTxBuilder,
+            bitfinity_tx_forwarder: self.bitfinity_tx_forwarder.clone(),
+        }
     }
 }
 
@@ -98,7 +105,18 @@ where
             proof_permits,
         );
 
-        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
+        Self {
+            inner: Arc::new(inner),
+            tx_resp_builder: EthTxBuilder,
+            bitfinity_tx_forwarder: OnceLock::new(),
+        }
+    }
+
+    pub fn set_bitfinity_tx_forwarder(
+        &self,
+        bitfinity_tx_forwarder: BitfinityTransactionsForwarder,
+    ) {
+        self.bitfinity_tx_forwarder.get_or_init(|| bitfinity_tx_forwarder);
     }
 }
 
@@ -141,7 +159,11 @@ where
             ctx.config.proof_permits,
         );
 
-        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
+        Self {
+            inner: Arc::new(inner),
+            tx_resp_builder: EthTxBuilder,
+            bitfinity_tx_forwarder: OnceLock::new(),
+        }
     }
 }
 

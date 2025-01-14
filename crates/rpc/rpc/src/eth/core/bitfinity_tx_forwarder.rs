@@ -13,7 +13,7 @@ use tracing::{debug, warn};
 pub type SharedQueue = Arc<Mutex<TransactionsPriorityQueue>>;
 
 /// Forwarder to push transactions to the priority queue.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BitfinityTransactionsForwarder {
     queue: SharedQueue,
 }
@@ -24,7 +24,7 @@ impl BitfinityTransactionsForwarder {
         Self { queue }
     }
 
-    async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()> {
+    pub async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()> {
         let typed_tx = TransactionSigned::decode(&mut (&raw[..])).map_err(|e| {
             warn!("Failed to decode signed transaction in the BitfinityTransactionsForwarder: {e}");
             EthApiError::FailedToDecodeSignedTransaction
@@ -38,7 +38,7 @@ impl BitfinityTransactionsForwarder {
         Ok(())
     }
 
-    async fn get_transaction_by_hash(&self, hash: B256) -> Option<Vec<u8>> {
+    pub async fn get_transaction_by_hash(&self, hash: B256) -> Option<Vec<u8>> {
         self.queue.lock().await.get(&hash)
     }
 }

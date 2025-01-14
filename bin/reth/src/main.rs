@@ -3,7 +3,10 @@
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
+use std::{sync::Arc, time::Duration};
+
 use clap::{Args, Parser};
+use reth::bitfinity_tasks::send_txs::BitfinityTransactionSender;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{
     engine_tree_config::{
@@ -13,7 +16,9 @@ use reth_node_builder::{
 };
 use reth_node_ethereum::node::EthereumAddOns;
 use reth_provider::providers::BlockchainProvider2;
+use reth_rpc::eth::core::bitfinity_tx_forwarder::{BitfinityTransactionsForwarder, TransactionsPriorityQueue};
 use reth_tracing::tracing::warn;
+use tokio::sync::Mutex;
 use tracing::info;
 
 /// Parameters for configuring the engine
@@ -102,18 +107,40 @@ fn main() {
                     let datadir = handle.node.data_dir.clone();
                     let (provider_factory, bitfinity) = handle.bitfinity_import.clone().expect("Bitfinity import not configured");
 
+                    
                     // Init bitfinity import
-                    {
+                    let executor = {
                         let import = BitfinityImportCommand::new(
                             config,
                             datadir,
                             chain,
-                            bitfinity,
+                            bitfinity.clone(),
                             provider_factory,
                             blockchain_provider,
                         );
-                        let _import_handle = import.schedule_execution(None).await?;
+                        let (executor, _import_handle) = import.schedule_execution(None).await?;
+                        executor
                     };
+
+                    if bitfinity.tx_queue {
+                        let queue = Arc::new(Mutex::new(TransactionsPriorityQueue::new(1000)));
+
+                        // Make EthApi handler move new txs to queue.
+                        let queue_clone = Arc::clone(&queue);
+                        handle.node.add_ons_handle.eth_api().set_bitfinity_tx_forwarder(BitfinityTransactionsForwarder::new(queue_clone));
+
+                        // Run batch transaction sender.
+                        let url = bitfinity.send_raw_transaction_rpc_url.unwrap_or(bitfinity.rpc_url);                        
+                        let period = Duration::from_secs(bitfinity.send_queued_txs_period_secs);
+                        let transaction_sending = BitfinityTransactionSender::new(
+                            queue,
+                            url,
+                            period,
+                            bitfinity.queued_txs_batch_size,
+                            bitfinity.queued_txs_per_execution_threshold,
+                        );
+                        let _sending_handle = transaction_sending.schedule_execution(Some(executor)).await?;
+                    }
 
                     handle.node_exit_future.await
                 }
