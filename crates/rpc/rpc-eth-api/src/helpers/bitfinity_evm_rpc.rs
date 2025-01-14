@@ -3,22 +3,28 @@
 use std::sync::Arc;
 
 use alloy_network::TransactionResponse;
+use alloy_rlp::Decodable;
 use did::{Block, H256};
 use ethereum_json_rpc_client::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use futures::Future;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
-use reth_primitives::RecoveredTx;
+use reth_primitives::{RecoveredTx, TransactionSigned};
 use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_types::TransactionSource;
-use reth_rpc_server_types::result::internal_rpc_err;
+use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use revm_primitives::{Address, Bytes, B256, U256};
+
+use super::bitfinity_tx_forwarder::BitfinityTransactionsForwarder;
 
 /// Proxy to the Bitfinity EVM RPC.
 pub trait BitfinityEvmRpc {
     /// Transaction type.
     type Transaction: SignedTransaction;
+
+    /// Returns transaction forwarder.
+    fn bitfinity_transaction_forwarder(&self) -> Option<BitfinityTransactionsForwarder>;
 
     /// Returns the `ChainSpec`.
     fn chain_spec(&self) -> Arc<ChainSpec>;
@@ -46,15 +52,29 @@ pub trait BitfinityEvmRpc {
         hash: B256,
     ) -> impl Future<Output = RpcResult<Option<TransactionSource<Self::Transaction>>>> + Send {
         let chain_spec = self.chain_spec();
-        // let forwarder = self.raw_tx_forwarder();
+        let forwarder = self.bitfinity_transaction_forwarder();
 
         async move {
-            // if let Some(forwarder) = forwarder {
-            //     let tx_opt = get_transaction_from_forwarder(&*forwarder, hash).await?;
-            //     if tx_opt.is_some() {
-            //         return Ok(tx_opt);
-            //     }
-            // };
+            // Try to find transaction in transaction forwarder.
+            if let Some(forwarder) = forwarder {
+                if let Some(raw_tx) = forwarder.get_transaction_by_hash(hash).await {
+                    let self_tx =
+                        <Self::Transaction as alloy_rlp::Decodable>::decode(&mut raw_tx.as_ref())
+                            .map_err(|e| {
+                            internal_rpc_err(format!(
+                            "failed to decode BitfinityEvmRpc::Transaction from tx forwarder: {e}"
+                        ))
+                        })?;
+
+                    let signer = self_tx.recover_signer().ok_or_else(|| {
+                        internal_rpc_err(
+                            "failed to recover signer from decoded BitfinityEvmRpc::Transaction",
+                        )
+                    })?;
+                    let recovered_tx = RecoveredTx::new_unchecked(self_tx, signer);
+                    return Ok(Some(TransactionSource::Pool(recovered_tx)));
+                }
+            };
 
             // If transaction is not found in forwarder, query it from EVM rpc.
             let (rpc_url, client) = get_client(&chain_spec)?;
@@ -124,7 +144,20 @@ pub trait BitfinityEvmRpc {
     /// Forwards `eth_sendRawTransaction` calls to the Bitfinity EVM
     fn btf_send_raw_transaction(&self, tx: Bytes) -> impl Future<Output = RpcResult<B256>> + Send {
         let chain_spec = self.chain_spec();
+        let forwarder = self.bitfinity_transaction_forwarder();
+
         async move {
+            if let Some(forwarder) = forwarder {
+                let typed_tx = TransactionSigned::decode(&mut tx.as_ref()).map_err(|e| {
+                    invalid_params_rpc_err(format!(
+                        "failed to decode eth_sendRawTransaction input {tx}: {e}"
+                    ))
+                })?;
+                let hash = typed_tx.hash();
+                forwarder.forward_raw_transaction(&tx).await?;
+                return Ok(hash);
+            };
+
             let (rpc_url, client) = get_client(&chain_spec)?;
 
             let tx_hash = client.send_raw_transaction_bytes(&tx).await.map_err(|e| {

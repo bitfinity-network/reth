@@ -1,3 +1,5 @@
+//! Module with instruments for transactions sorting, batching and sending.
+
 use std::{collections::BTreeSet, sync::Arc};
 
 use alloy_consensus::Transaction;
@@ -24,6 +26,7 @@ impl BitfinityTransactionsForwarder {
         Self { queue }
     }
 
+    /// Adds raw tx to the priority queue.
     pub async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()> {
         let typed_tx = TransactionSigned::decode(&mut (&raw[..])).map_err(|e| {
             warn!("Failed to decode signed transaction in the BitfinityTransactionsForwarder: {e}");
@@ -38,6 +41,7 @@ impl BitfinityTransactionsForwarder {
         Ok(())
     }
 
+    /// Returns transaction from priority queue, if present.
     pub async fn get_transaction_by_hash(&self, hash: B256) -> Option<Vec<u8>> {
         self.queue.lock().await.get(&hash)
     }

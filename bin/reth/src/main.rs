@@ -16,7 +16,7 @@ use reth_node_builder::{
 };
 use reth_node_ethereum::node::EthereumAddOns;
 use reth_provider::providers::BlockchainProvider2;
-use reth_rpc::eth::core::bitfinity_tx_forwarder::{BitfinityTransactionsForwarder, TransactionsPriorityQueue};
+use reth_rpc_api::eth::helpers::bitfinity_tx_forwarder::{BitfinityTransactionsForwarder, TransactionsPriorityQueue};
 use reth_tracing::tracing::warn;
 use tokio::sync::Mutex;
 use tracing::info;

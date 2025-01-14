@@ -7,7 +7,6 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
-use bitfinity_tx_forwarder::BitfinityTransactionsForwarder;
 use derive_more::Deref;
 use reth_primitives::NodePrimitives;
 use reth_provider::{
@@ -15,7 +14,7 @@ use reth_provider::{
     ProviderReceipt,
 };
 use reth_rpc_eth_api::{
-    helpers::{EthSigner, SpawnBlocking},
+    helpers::{bitfinity_tx_forwarder::BitfinityTransactionsForwarder, EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
     EthApiTypes, RpcNodeCore,
 };
@@ -30,8 +29,6 @@ use reth_tasks::{
 use tokio::sync::{broadcast, Mutex};
 
 use crate::eth::EthTxBuilder;
-
-pub mod bitfinity_tx_forwarder;
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
@@ -112,6 +109,7 @@ where
         }
     }
 
+    /// Sets bitfinity tx forwarder to handle new raw transactions.
     pub fn set_bitfinity_tx_forwarder(
         &self,
         bitfinity_tx_forwarder: BitfinityTransactionsForwarder,

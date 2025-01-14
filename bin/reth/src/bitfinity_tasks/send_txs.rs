@@ -11,7 +11,7 @@ use lightspeed_scheduler::job::Job;
 use lightspeed_scheduler::scheduler::Scheduler;
 use lightspeed_scheduler::JobExecutor;
 use reth_node_core::version::SHORT_VERSION;
-use reth_rpc::eth::core::bitfinity_tx_forwarder::SharedQueue;
+use reth_rpc_api::eth::helpers::bitfinity_tx_forwarder::SharedQueue;
 use revm_primitives::{hex, U256};
 use tracing::{info, trace, warn};
 

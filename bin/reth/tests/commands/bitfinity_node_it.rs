@@ -31,8 +31,10 @@ use reth_node_ethereum::{
 };
 use reth_primitives::{Transaction, TransactionSigned};
 use reth_provider::providers::BlockchainProvider;
-use reth_rpc::eth::core::bitfinity_tx_forwarder::{SharedQueue, TransactionsPriorityQueue};
 use reth_rpc::EthApi;
+use reth_rpc_api::eth::helpers::bitfinity_tx_forwarder::{
+    BitfinityTransactionsForwarder, SharedQueue, TransactionsPriorityQueue,
+};
 use reth_tasks::TaskManager;
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
 use reth_transaction_pool::test_utils::MockTransaction;
@@ -191,52 +193,52 @@ async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
     assert_eq!(result[2].1, U256::from(30).into());
 }
 
-// #[tokio::test]
-// async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
-//     // Arrange
-//     let _log = init_logs();
-//     let tasks = TaskManager::current();
+#[tokio::test]
+async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
+    // Arrange
+    let _log = init_logs();
+    let tasks = TaskManager::current();
 
-//     let (tx_sender, mut tx_receiver) = tokio::sync::mpsc::channel(10);
-//     let eth_server = EthImpl::new(Some(tx_sender));
+    let (tx_sender, mut tx_receiver) = tokio::sync::mpsc::channel(10);
+    let eth_server = EthImpl::new(Some(tx_sender));
 
-//     let queue = Arc::new(Mutex::new(TransactionsPriorityQueue::new(10)));
+    let queue = Arc::new(Mutex::new(TransactionsPriorityQueue::new(10)));
 
-//     let (_server, eth_server_address) =
-//         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
-//     let bitfinity_evm_url = format!("http://{}", eth_server_address);
-//     let (reth_client, _reth_node) = start_reth_node(
-//         &tasks,
-//         Some(format!("http://{}", eth_server_address)),
-//         None,
-//         Some(queue.clone()),
-//     )
-//     .await;
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let bitfinity_evm_url = format!("http://{}", eth_server_address);
+    let (reth_client, _reth_node) = start_reth_node(
+        &tasks,
+        Some(format!("http://{}", eth_server_address)),
+        None,
+        Some(queue.clone()),
+    )
+    .await;
 
-//     // Create a random transaction
-//     let mut tx = [0u8; 256];
-//     rand::thread_rng().fill_bytes(&mut tx);
-//     let expected_tx_hash = keccak::keccak_hash(format!("0x{}", hex::encode(tx)).as_bytes());
+    // Create a random transaction
+    let tx = transaction_with_gas_price(100);
+    let encoded = alloy_rlp::encode(&tx);
+    let expected_tx_hash = keccak::keccak_hash(&encoded);
 
-//     // Act
-//     let result = reth_client.send_raw_transaction_bytes(&encoded).await.unwrap();
+    // Act
+    let result = reth_client.send_raw_transaction_bytes(&encoded).await.unwrap();
 
-//     // Assert
-//     assert_eq!(result.to_fixed_bytes(), expected_tx_hash.0.to_fixed_bytes());
+    // Assert
+    assert_eq!(result, expected_tx_hash);
 
-//     let transaction_sending = BitfinityTransactionSender::new(
-//         queue,
-//         bitfinity_evm_url,
-//         Duration::from_millis(200),
-//         10,
-//         100,
-//     );
-//     transaction_sending.single_execution().await.unwrap();
+    let transaction_sending = BitfinityTransactionSender::new(
+        queue,
+        bitfinity_evm_url,
+        Duration::from_millis(200),
+        10,
+        100,
+    );
+    transaction_sending.single_execution().await.unwrap();
 
-//     let received_txs = consume_received_txs(&mut tx_receiver, 1).await.unwrap();
+    let received_txs = consume_received_txs(&mut tx_receiver, 1).await.unwrap();
 
-//     assert_eq!(received_txs[0].0, expected_tx_hash.0.to_fixed_bytes());
-// }
+    assert_eq!(received_txs[0], expected_tx_hash.0);
+}
 
 #[tokio::test]
 async fn bitfinity_test_node_send_raw_transaction_in_gas_price_order() {
@@ -386,7 +388,7 @@ async fn start_reth_node(
     tasks: &TaskManager,
     bitfinity_evm_url: Option<String>,
     import_data: Option<ImportData>,
-    _queue: Option<SharedQueue>,
+    queue: Option<SharedQueue>,
 ) -> (
     EthJsonRpcClient<ReqwestClient>,
     NodeHandle<
@@ -505,12 +507,11 @@ async fn start_reth_node(
         .with_database(database)
         .with_launch_context(tasks.executor())
         .node(EthereumNode::default())
-        .extend_rpc_modules(|_ctx| {
+        .extend_rpc_modules(|ctx| {
             // Add custom forwarder with transactions priority queue.
-            // let Some(queue) = queue else { return Ok(()) };
-            // let forwarder = BitfinityTransactionsForwarder::new(queue);
-            // ctx.registry.set_eth_raw_transaction_forwarder(Arc::new(forwarder));
-
+            let Some(queue) = queue else { return Ok(()) };
+            let forwarder = BitfinityTransactionsForwarder::new(queue);
+            ctx.registry.eth_api().set_bitfinity_tx_forwarder(forwarder);
             Ok(())
         })
         .launch()

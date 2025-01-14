@@ -15,6 +15,8 @@
 //! all the `Eth` traits, e.g. `reth_rpc::EthApi`.
 
 pub mod bitfinity_evm_rpc;
+pub mod bitfinity_tx_forwarder;
+
 pub mod block;
 pub mod blocking_task;
 pub mod call;
