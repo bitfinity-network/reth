@@ -30,6 +30,8 @@ use tokio::sync::{broadcast, Mutex};
 
 use crate::eth::EthTxBuilder;
 
+pub mod bitfinity_tx_forwarder;
+
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
 /// `Eth` API implementation.
@@ -48,6 +50,7 @@ pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig> {
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
     /// Transaction RPC response builder.
     pub tx_resp_builder: EthTxBuilder,
+    // pub bitfinity_tx_forwarder: Option<()>,
 }
 
 impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig>

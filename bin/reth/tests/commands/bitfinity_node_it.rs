@@ -11,9 +11,7 @@ use jsonrpsee::{
     server::{Server, ServerHandle},
     Methods, RpcModule,
 };
-use reth::bitfinity_tasks::send_txs::{
-    BitfinityTransactionSender, SharedQueue, TransactionsPriorityQueue,
-};
+use reth::bitfinity_tasks::send_txs::BitfinityTransactionSender;
 use reth::{
     args::{DatadirArgs, RpcServerArgs},
     dirs::{DataDirPath, MaybePlatformPath},
@@ -33,6 +31,7 @@ use reth_node_ethereum::{
 };
 use reth_primitives::{Transaction, TransactionSigned};
 use reth_provider::providers::BlockchainProvider;
+use reth_rpc::eth::core::bitfinity_tx_forwarder::{SharedQueue, TransactionsPriorityQueue};
 use reth_rpc::EthApi;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
