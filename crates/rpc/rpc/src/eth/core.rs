@@ -50,7 +50,7 @@ pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig> {
     pub tx_resp_builder: EthTxBuilder,
 
     /// Bitfinity transaction forwarder.
-    pub bitfinity_tx_forwarder: OnceLock<BitfinityTransactionsForwarder>,
+    pub bitfinity_tx_forwarder: Arc<OnceLock<BitfinityTransactionsForwarder>>,
 }
 
 impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig>
@@ -105,7 +105,7 @@ where
         Self {
             inner: Arc::new(inner),
             tx_resp_builder: EthTxBuilder,
-            bitfinity_tx_forwarder: OnceLock::new(),
+            bitfinity_tx_forwarder: Arc::new(OnceLock::new()),
         }
     }
 
@@ -160,7 +160,7 @@ where
         Self {
             inner: Arc::new(inner),
             tx_resp_builder: EthTxBuilder,
-            bitfinity_tx_forwarder: OnceLock::new(),
+            bitfinity_tx_forwarder: Arc::new(OnceLock::new()),
         }
     }
 }

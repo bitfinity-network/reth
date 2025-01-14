@@ -326,6 +326,7 @@ async fn bitfinity_test_node_get_transaction_when_it_is_queued() {
     for hash in &expected_hashes {
         let tx = reth_client.get_transaction_by_hash(hash.clone()).await.unwrap().unwrap();
         // Transaction in forwarder has NO block number.
+        dbg!(tx.block_number);
         assert!(tx.block_number.is_none());
     }
 
@@ -507,7 +508,7 @@ async fn start_reth_node(
         .with_database(database)
         .with_launch_context(tasks.executor())
         .node(EthereumNode::default())
-        .extend_rpc_modules(|ctx| {
+        .on_rpc_started(|ctx, _| {
             // Add custom forwarder with transactions priority queue.
             let Some(queue) = queue else { return Ok(()) };
             let forwarder = BitfinityTransactionsForwarder::new(queue);
@@ -520,6 +521,7 @@ async fn start_reth_node(
 
     let reth_address = node_handle.node.rpc_server_handle().http_local_addr().unwrap();
     let addr_string = format!("http://{}", reth_address);
+
     let client: EthJsonRpcClient<ReqwestClient> =
         EthJsonRpcClient::new(ReqwestClient::new(addr_string));
 
