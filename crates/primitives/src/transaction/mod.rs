@@ -220,10 +220,10 @@ impl Transaction {
     pub fn set_chain_id(&mut self, chain_id: u64) {
         match self {
             Self::Legacy(TxLegacy { chain_id: ref mut c, .. }) => *c = Some(chain_id),
-            Self::Eip2930(TxEip2930 { chain_id: ref mut c, .. })
-            | Self::Eip1559(TxEip1559 { chain_id: ref mut c, .. })
-            | Self::Eip4844(TxEip4844 { chain_id: ref mut c, .. })
-            | Self::Eip7702(TxEip7702 { chain_id: ref mut c, .. }) => *c = chain_id,
+            Self::Eip2930(TxEip2930 { chain_id: ref mut c, .. }) |
+            Self::Eip1559(TxEip1559 { chain_id: ref mut c, .. }) |
+            Self::Eip4844(TxEip4844 { chain_id: ref mut c, .. }) |
+            Self::Eip7702(TxEip7702 { chain_id: ref mut c, .. }) => *c = chain_id,
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => { /* noop */ }
         }
@@ -268,7 +268,7 @@ impl Transaction {
 
         // Check if max_fee_per_gas is less than base_fee
         if max_fee_per_gas < base_fee {
-            return None;
+            return None
         }
 
         // Calculate the difference between max_fee_per_gas and base_fee
@@ -815,9 +815,9 @@ impl Hash for TransactionSigned {
 
 impl PartialEq for TransactionSigned {
     fn eq(&self, other: &Self) -> bool {
-        self.signature == other.signature
-            && self.transaction == other.transaction
-            && self.tx_hash() == other.tx_hash()
+        self.signature == other.signature &&
+            self.transaction == other.transaction &&
+            self.tx_hash() == other.tx_hash()
     }
 }
 
@@ -968,7 +968,7 @@ impl SignedTransaction for TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from);
+            return Some(from)
         }
         let signature_hash = self.signature_hash();
         recover_signer(&self.signature, signature_hash)
@@ -979,7 +979,7 @@ impl SignedTransaction for TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from);
+            return Some(from)
         }
         self.encode_for_signing(buf);
         let signature_hash = keccak256(buf);
@@ -1793,6 +1793,16 @@ mod tests {
         let buf = [0x80];
         let decoded = TxKind::decode(&mut &buf[..]).unwrap();
         assert_eq!(decoded, TxKind::Create);
+    }
+
+    #[test]
+    fn test_decode_create_goerli() {
+        // test that an example create tx from goerli decodes properly
+        let tx_bytes = hex!("b901f202f901ee05228459682f008459682f11830209bf8080b90195608060405234801561001057600080fd5b50610175806100206000396000f3fe608060405234801561001057600080fd5b506004361061002b5760003560e01c80630c49c36c14610030575b600080fd5b61003861004e565b604051610045919061011d565b60405180910390f35b60606020600052600f6020527f68656c6c6f2073746174656d696e64000000000000000000000000000000000060405260406000f35b600081519050919050565b600082825260208201905092915050565b60005b838110156100be5780820151818401526020810190506100a3565b838111156100cd576000848401525b50505050565b6000601f19601f8301169050919050565b60006100ef82610084565b6100f9818561008f565b93506101098185602086016100a0565b610112816100d3565b840191505092915050565b6000602082019050818103600083015261013781846100e4565b90509291505056fea264697066735822122051449585839a4ea5ac23cae4552ef8a96b64ff59d0668f76bfac3796b2bdbb3664736f6c63430008090033c080a0136ebffaa8fc8b9fda9124de9ccb0b1f64e90fbd44251b4c4ac2501e60b104f9a07eb2999eec6d185ef57e91ed099afb0a926c5b536f0155dd67e537c7476e1471");
+
+        let decoded = TransactionSigned::decode(&mut &tx_bytes[..]).unwrap();
+        assert_eq!(tx_bytes.len(), decoded.length());
+        assert_eq!(tx_bytes, &alloy_rlp::encode(decoded)[..]);
     }
 
     #[test]
