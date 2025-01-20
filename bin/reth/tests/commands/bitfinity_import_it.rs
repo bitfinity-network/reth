@@ -1,5 +1,5 @@
 //!
-//! Integration tests for the bitfinity import command.
+//! Integration tests for the bitfinity import command with BlockchainProvider2.
 //! These tests requires a running EVM node or EVM block extractor node at the specified URL.
 //!
 
