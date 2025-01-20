@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use alloy_consensus::Transaction;
 use alloy_network::TransactionResponse;
 use alloy_rlp::Decodable;
 use did::{Block, H256};
@@ -9,8 +10,9 @@ use ethereum_json_rpc_client::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use futures::Future;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_primitives::{RecoveredTx, TransactionSigned};
+use reth_primitives_traits::constants::MINIMUM_GAS_LIMIT;
 use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_types::TransactionSource;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
@@ -147,12 +149,15 @@ pub trait BitfinityEvmRpc {
         let forwarder = self.bitfinity_transaction_forwarder();
 
         async move {
+            let typed_tx = TransactionSigned::decode(&mut tx.as_ref()).map_err(|e| {
+                invalid_params_rpc_err(format!(
+                    "failed to decode eth_sendRawTransaction input {tx}: {e}"
+                ))
+            })?;
+
+            validate_raw_transaction(&typed_tx, &chain_spec)?;
+
             if let Some(forwarder) = forwarder {
-                let typed_tx = TransactionSigned::decode(&mut tx.as_ref()).map_err(|e| {
-                    invalid_params_rpc_err(format!(
-                        "failed to decode eth_sendRawTransaction input {tx}: {e}"
-                    ))
-                })?;
                 let hash = typed_tx.hash();
                 forwarder.forward_raw_transaction(&tx).await?;
                 return Ok(hash);
@@ -219,4 +224,34 @@ fn get_client(chain_spec: &ChainSpec) -> RpcResult<(&String, EthJsonRpcClient<Re
     );
 
     Ok((rpc_url, client))
+}
+fn validate_raw_transaction(tx: &TransactionSigned, chain_spec: &ChainSpec) -> RpcResult<()> {
+    // Check chain id
+    if tx.chain_id() != Some(chain_spec.chain_id()) {
+        return Err(invalid_params_rpc_err(format!(
+            "expected chain id == {}",
+            chain_spec.chain_id()
+        )));
+    }
+
+    // Check signature correctness
+    if tx.recover_signer().is_none() {
+        return Err(invalid_params_rpc_err(
+            "transaction signature verification failed".to_string(),
+        ));
+    }
+
+    // Check signature malleability
+    did::transaction::Signature::check_malleability(&tx.signature.s().into())
+        .map_err(|e| invalid_params_rpc_err(format!("signature malleability check failed: {e}")))?;
+
+    // Check min gas limit
+    if tx.gas_limit() < MINIMUM_GAS_LIMIT {
+        return Err(invalid_params_rpc_err(format!(
+            "expected gas limit greater or equal to {MINIMUM_GAS_LIMIT}, found: {}",
+            tx.gas_limit()
+        )));
+    }
+
+    Ok(())
 }
