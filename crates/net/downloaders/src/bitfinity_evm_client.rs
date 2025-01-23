@@ -317,7 +317,11 @@ impl BitfinityEvmClient {
                 (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
                 (
                     EthereumHardfork::Paris.boxed(),
-                    ForkCondition::TTD { activation_block_number: 0, fork_block: Some(0), total_difficulty: U256::from(0) },
+                    ForkCondition::TTD {
+                        activation_block_number: 0,
+                        fork_block: Some(0),
+                        total_difficulty: U256::from(0),
+                    },
                 ),
             ]),
             deposit_contract: None,
@@ -347,53 +351,99 @@ impl BitfinityEvmClient {
         self
     }
 
+    /// Check if the RPC endpoint is producing new blocks
+    async fn is_producing_blocks(client: &EthJsonRpcClient<ReqwestClient>) -> bool {
+        const INITIAL_DELAY: u64 = 100; // Start with 500ms
+        const MAX_DELAY: u64 = 5000; // Max delay of 5s
+        const MAX_RETRIES: u8 = 3;
+
+        // Get current block number
+        let initial_block = match client.get_block_number().await {
+            Ok(block) => block,
+            Err(_) => return false,
+        };
+
+        let mut current_delay = INITIAL_DELAY;
+        let mut retries = 0;
+
+        while retries < MAX_RETRIES {
+            // Wait with exponential backoff
+            tokio::time::sleep(Duration::from_millis(current_delay)).await;
+
+            // Check if block number increased
+            match client.get_block_number().await {
+                Ok(new_block) if new_block > initial_block => return true,
+                Ok(_) => {
+                    // Exponential backoff with max delay cap
+                    current_delay = (current_delay * 2).min(MAX_DELAY);
+                    retries += 1;
+                }
+                Err(_) => return false,
+            }
+        }
+
+        false
+    }
+
     /// Creates a new JSON-RPC client with retry functionality
     ///
-    /// Tries the primary URL first, falls back to backup URL if provided
+    /// Tries the primary URL first, falls back to backup URL if provided or if primary is not producing blocks
     pub async fn client(config: RpcClientConfig) -> Result<EthJsonRpcClient<ReqwestClient>> {
+        // Create retry configuration
         let backoff = ExponentialBuilder::default()
             .with_max_times(config.max_retries as _)
             .with_max_delay(config.retry_delay)
             .with_jitter();
 
-        // Helper closure to create and test a client connection
-        let try_connect = move |url: String| {
-            let backoff = backoff;
-            let client = EthJsonRpcClient::new(ReqwestClient::new(url));
-
-            async move {
-                // Test connection by getting chain ID
-                (|| async { client.get_chain_id().await })
-                    .retry(&backoff)
-                    .notify(|e, dur| {
-                        error!(
-                            target: "downloaders::bitfinity_evm_client",
-                            "Failed to connect after {}s and {} retries: {}",
-                            dur.as_secs(),
-                            config.max_retries,
-                            e
-                        );
-                    })
-                    .await
-                    .map(|_| client)
-            }
-        };
-
         // Try primary URL first
-        if let Ok(client) = try_connect(config.primary_url).await {
-            debug!(target: "downloaders::bitfinity_evm_client", "Connected to primary RPC endpoint");
-            return Ok(client);
-        }
-
-        // Fall back to backup URL if available
-        if let Some(backup_url) = config.backup_url {
-            if let Ok(client) = try_connect(backup_url).await {
-                debug!(target: "downloaders::bitfinity_evm_client", "Connected to backup RPC endpoint");
-                return Ok(client);
+        if let Ok(primary) = Self::connect_and_verify(&config.primary_url, &backoff).await {
+            if Self::is_producing_blocks(&primary).await {
+                debug!(target: "downloaders::bitfinity_evm_client", "Using primary RPC endpoint - producing blocks");
+                return Ok(primary);
             }
         }
 
+        // Try backup URL if available
+        if let Some(backup_url) = config.backup_url {
+            if let Ok(backup) = Self::connect_and_verify(&backup_url, &backoff).await {
+                if Self::is_producing_blocks(&backup).await {
+                    warn!(target: "downloaders::bitfinity_evm_client", "Primary RPC endpoint not producing blocks, using backup");
+                    return Ok(backup);
+                }
+            }
+        }
+
+        // Fall back to primary if it connected but wasn't producing blocks
+        if let Ok(primary) = Self::connect_and_verify(&config.primary_url, &backoff).await {
+            warn!(target: "downloaders::bitfinity_evm_client", "No endpoints producing blocks, using primary as fallback");
+            return Ok(primary);
+        }
+
+        // If we get here, neither endpoint worked
         Err(eyre::eyre!("Failed to connect to any RPC endpoint"))
+    }
+
+    /// Helper function to connect to an RPC endpoint and verify the connection
+    async fn connect_and_verify(
+        url: &str,
+        backoff: &ExponentialBuilder,
+    ) -> Result<EthJsonRpcClient<ReqwestClient>> {
+        let client = EthJsonRpcClient::new(ReqwestClient::new(url.to_string()));
+
+        // Test connection by getting chain ID
+        (|| async { client.get_chain_id().await })
+            .retry(backoff)
+            .notify(|e, dur| {
+                error!(
+                    target: "downloaders::bitfinity_evm_client",
+                    "Failed to connect to {} after {}s: {}",
+                    url,
+                    dur.as_secs(),
+                    e
+                );
+            })
+            .await
+            .map(|_| client)
     }
 }
 
@@ -451,14 +501,21 @@ impl BlockCertificateChecker {
             })?;
 
         let current_time_ns = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("Should be able to get the time")
-        .as_nanos();
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Should be able to get the time")
+            .as_nanos();
         let allowed_certificate_time_offset = Duration::from_secs(120).as_nanos();
 
-        certificate.verify(self.evmc_principal.as_ref(), &self.ic_root_key, &current_time_ns, &allowed_certificate_time_offset).map_err(|e| {
-            RemoteClientError::CertificateError(format!("certificate validation error: {e}"))
-        })?;
+        certificate
+            .verify(
+                self.evmc_principal.as_ref(),
+                &self.ic_root_key,
+                &current_time_ns,
+                &allowed_certificate_time_offset,
+            )
+            .map_err(|e| {
+                RemoteClientError::CertificateError(format!("certificate validation error: {e}"))
+            })?;
 
         let tree = HashTree::from_cbor(&self.certified_data.witness).map_err(|e| {
             RemoteClientError::CertificateError(format!("failed to parse witness: {e}"))
