@@ -3,7 +3,7 @@
 //!
 
 use super::utils::*;
-use did::keccak;
+use did::keccak::{self, keccak_hash};
 use eth_server::{EthImpl, EthServer};
 use ethereum_json_rpc_client::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
@@ -19,6 +19,7 @@ use reth::{
 use reth_consensus::FullConsensus;
 use reth_db::DatabaseEnv;
 use reth_db::{init_db, test_utils::tempdir_path};
+use reth_discv5::discv5::enr::secp256k1::{Keypair, Secp256k1};
 use reth_network::NetworkHandle;
 use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
 use reth_node_builder::components::Components;
@@ -28,15 +29,18 @@ use reth_node_ethereum::node::EthereumEngineValidatorBuilder;
 use reth_node_ethereum::{
     BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory, EthereumNode,
 };
+use reth_primitives::{Transaction, TransactionSigned};
+use reth_primitives_traits::constants::MINIMUM_GAS_LIMIT;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc::EthApi;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::blobstore::DiskFileBlobStore;
+use reth_transaction_pool::test_utils::MockTransaction;
 use reth_transaction_pool::{
     CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool,
     TransactionValidationTaskExecutor,
 };
-use revm_primitives::{hex, Address, U256};
+use revm_primitives::{hex, Address, B256, U256};
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 
 #[tokio::test]
@@ -179,26 +183,55 @@ async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
 }
 
 #[tokio::test]
-async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
+async fn bitfinity_test_node_validates_raw_transactions() {
     // Arrange
     let _log = init_logs();
 
     let eth_server = EthImpl::new();
+    let txs_list = eth_server.received_tx_hashes.clone();
     let (_server, eth_server_address) =
         mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_client, _reth_node) =
         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
-    // Create a random transaction
-    let mut tx = [0u8; 256];
-    rand::thread_rng().fill_bytes(&mut tx);
-    let expected_tx_hash = keccak::keccak_hash(format!("0x{}", hex::encode(tx)).as_bytes());
+    // Create a transaction
+    let mock_tx = MockTransaction::legacy();
 
-    // Act
-    let result = reth_client.send_raw_transaction_bytes(&tx).await;
+    // Tx with incorrect data should be stopped by reth.
+    let tx = sign_tx_with_random_key_pair(mock_tx.clone().into());
+    let raw_tx = alloy_rlp::encode(&tx);
+    let result = reth_client.send_raw_transaction_bytes(&raw_tx).await;
+    assert!(result.is_err());
+    assert!(txs_list.read().await.is_empty());
 
-    // Assert
-    assert_eq!(result.unwrap(), expected_tx_hash);
+    // Tx with correct data should pass to the Eth.
+    let mut mock_tx = mock_tx.with_gas_limit(MINIMUM_GAS_LIMIT);
+    let eth_chain_id = reth_client.get_chain_id().await.unwrap();
+    match &mut mock_tx {
+        MockTransaction::Legacy { chain_id, .. } => *chain_id = Some(eth_chain_id),
+        _ => unreachable!(),
+    };
+    let tx = sign_tx_with_random_key_pair(mock_tx.clone().into());
+    let raw_tx = alloy_rlp::encode(&tx);
+    let result = reth_client.send_raw_transaction_bytes(&raw_tx).await;
+    let expected_hash = keccak_hash(&raw_tx);
+    assert_eq!(txs_list.read().await.first().unwrap(), &expected_hash.0);
+    assert_eq!(result.unwrap(), expected_hash);
+}
+
+fn sign_tx_with_random_key_pair(tx: Transaction) -> TransactionSigned {
+    let secp = Secp256k1::new();
+    let key_pair = Keypair::new(&secp, &mut rand::thread_rng());
+    sign_tx_with_key_pair(key_pair, tx)
+}
+
+fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
+    let signature = reth_primitives::sign_message(
+        B256::from_slice(&key_pair.secret_bytes()[..]),
+        tx.signature_hash(),
+    )
+    .unwrap();
+    TransactionSigned::new(tx, signature, Default::default())
 }
 
 /// Start a local reth node
@@ -207,7 +240,88 @@ async fn start_reth_node(
     import_data: Option<ImportData>,
 ) -> (
     EthJsonRpcClient<ReqwestClient>,
-    NodeHandle<NodeAdapter<FullNodeTypesAdapter<EthereumNode, Arc<DatabaseEnv>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>, Components<FullNodeTypesAdapter<EthereumNode, Arc<DatabaseEnv>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>, reth_network::EthNetworkPrimitives, Pool<TransactionValidationTaskExecutor<EthTransactionValidator<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, EthPooledTransaction>>, CoinbaseTipOrdering<EthPooledTransaction>, DiskFileBlobStore>, EthEvmConfig, BasicBlockExecutorProvider<EthExecutionStrategyFactory>, Arc<dyn FullConsensus>>>, RpcAddOns<NodeAdapter<FullNodeTypesAdapter<EthereumNode, Arc<DatabaseEnv>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>, Components<FullNodeTypesAdapter<EthereumNode, Arc<DatabaseEnv>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>, reth_network::EthNetworkPrimitives, Pool<TransactionValidationTaskExecutor<EthTransactionValidator<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, EthPooledTransaction>>, CoinbaseTipOrdering<EthPooledTransaction>, DiskFileBlobStore>, EthEvmConfig, BasicBlockExecutorProvider<EthExecutionStrategyFactory>, Arc<dyn FullConsensus>>>, EthApi<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, Pool<TransactionValidationTaskExecutor<EthTransactionValidator<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, EthPooledTransaction>>, CoinbaseTipOrdering<EthPooledTransaction>, DiskFileBlobStore>, NetworkHandle, EthEvmConfig>, EthereumEngineValidatorBuilder>>,
+    NodeHandle<
+        NodeAdapter<
+            FullNodeTypesAdapter<
+                EthereumNode,
+                Arc<DatabaseEnv>,
+                BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+            >,
+            Components<
+                FullNodeTypesAdapter<
+                    EthereumNode,
+                    Arc<DatabaseEnv>,
+                    BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+                >,
+                reth_network::EthNetworkPrimitives,
+                Pool<
+                    TransactionValidationTaskExecutor<
+                        EthTransactionValidator<
+                            BlockchainProvider<
+                                NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                            >,
+                            EthPooledTransaction,
+                        >,
+                    >,
+                    CoinbaseTipOrdering<EthPooledTransaction>,
+                    DiskFileBlobStore,
+                >,
+                EthEvmConfig,
+                BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
+                Arc<dyn FullConsensus>,
+            >,
+        >,
+        RpcAddOns<
+            NodeAdapter<
+                FullNodeTypesAdapter<
+                    EthereumNode,
+                    Arc<DatabaseEnv>,
+                    BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+                >,
+                Components<
+                    FullNodeTypesAdapter<
+                        EthereumNode,
+                        Arc<DatabaseEnv>,
+                        BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+                    >,
+                    reth_network::EthNetworkPrimitives,
+                    Pool<
+                        TransactionValidationTaskExecutor<
+                            EthTransactionValidator<
+                                BlockchainProvider<
+                                    NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                                >,
+                                EthPooledTransaction,
+                            >,
+                        >,
+                        CoinbaseTipOrdering<EthPooledTransaction>,
+                        DiskFileBlobStore,
+                    >,
+                    EthEvmConfig,
+                    BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
+                    Arc<dyn FullConsensus>,
+                >,
+            >,
+            EthApi<
+                BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+                Pool<
+                    TransactionValidationTaskExecutor<
+                        EthTransactionValidator<
+                            BlockchainProvider<
+                                NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                            >,
+                            EthPooledTransaction,
+                        >,
+                    >,
+                    CoinbaseTipOrdering<EthPooledTransaction>,
+                    DiskFileBlobStore,
+                >,
+                NetworkHandle,
+                EthEvmConfig,
+            >,
+            EthereumEngineValidatorBuilder,
+        >,
+    >,
 ) {
     let tasks = TaskManager::current();
 
@@ -273,11 +387,14 @@ async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle, So
 /// Eth server mock for local testing
 pub mod eth_server {
 
+    use std::sync::Arc;
+
     use alloy_rlp::Bytes;
     use did::keccak;
     use ethereum_json_rpc_client::CertifiedResult;
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-    use revm_primitives::{Address, B256, U256};
+    use revm_primitives::{hex, Address, B256, U256};
+    use tokio::sync::RwLock;
 
     #[rpc(server, namespace = "eth")]
     pub trait Eth {
@@ -311,12 +428,18 @@ pub mod eth_server {
         pub gas_price: u128,
         /// Current max priority fee per gas
         pub max_priority_fee_per_gas: u128,
+        /// List of received transactions hashes.
+        pub received_tx_hashes: Arc<RwLock<Vec<B256>>>,
     }
 
     impl EthImpl {
         /// Create a new Eth server implementation
         pub fn new() -> Self {
-            Self { gas_price: rand::random(), max_priority_fee_per_gas: rand::random() }
+            Self {
+                gas_price: rand::random(),
+                max_priority_fee_per_gas: rand::random(),
+                received_tx_hashes: Default::default(),
+            }
         }
     }
 
@@ -337,7 +460,9 @@ pub mod eth_server {
         }
 
         async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
+            let tx = hex::decode(&tx).unwrap();
             let hash = keccak::keccak_hash(&tx);
+            self.received_tx_hashes.write().await.push(hash.0);
             Ok(hash.into())
         }
 
