@@ -185,7 +185,7 @@ where
 
         // TODO Check difficulty increment between parent and self
         // Ace age did increment it by some formula that we need to follow.
-        // self.validate_against_parent_gas_limit(header, parent)?;
+        self.validate_against_parent_gas_limit(header, parent)?;
 
         validate_against_parent_eip1559_base_fee(
             header.header(),
