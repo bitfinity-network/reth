@@ -1,10 +1,12 @@
 //! Bitfinity block validator.
-use std::collections::HashSet;
-
+use alloy_primitives::{Address, B256, U256};
 use did::BlockConfirmationData;
 use evm_canister_client::{CanisterClient, EvmCanisterClient};
+use eyre::Ok;
 use reth_chain_state::MemoryOverlayStateProvider;
+use reth_evm::env::EvmEnv;
 use reth_evm::execute::{BasicBatchExecutor, BatchExecutor};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_evm_ethereum::{
     execute::{EthExecutionStrategy, EthExecutionStrategyFactory},
     EthEvmConfig,
@@ -15,7 +17,18 @@ use reth_provider::{
     providers::ProviderNodeTypes, ChainSpecProvider as _, ExecutionOutcome,
     HashedPostStateProvider as _, LatestStateProviderRef, ProviderFactory,
 };
+use reth_provider::{BlockNumReader, DatabaseProviderFactory, HeaderProvider, StateRootProvider};
+use reth_revm::db::CacheDB;
+use reth_revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, TxEnv};
 use reth_revm::{batch::BlockBatchRecord, database::StateProviderDatabase};
+use reth_revm::{CacheState, DatabaseCommit, Evm, StateBuilder};
+use reth_rpc_eth_types::cache::db::StateProviderTraitObjWrapper;
+use reth_rpc_eth_types::StateCacheDb;
+use reth_trie::{HashedPostState, KeccakKeyHasher};
+use reth_trie::{KeyHasher, StateRoot};
+use reth_trie_db::DatabaseStateRoot;
+use std::collections::HashSet;
+use std::sync::Arc;
 
 /// Block validator for Bitfinity.
 ///
@@ -47,7 +60,7 @@ where
     /// Validate a block.
     pub async fn validate_blocks(&self, blocks: &[Block]) -> eyre::Result<()> {
         if blocks.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
         let execution_result = self.execute_blocks(blocks)?;
@@ -77,17 +90,13 @@ where
         block: &Block,
         execution_result: ExecutionOutcome,
     ) -> eyre::Result<BlockConfirmationData> {
-        let provider = self.provider_factory.provider()?;
-        let state_provider = LatestStateProviderRef::new(&provider);
-        let updated_state = state_provider.hashed_post_state(execution_result.state());
-
         Ok(BlockConfirmationData {
             block_number: block.number,
             hash: block.hash_slow().into(),
             state_root: block.state_root.into(),
             transactions_root: block.transactions_root.into(),
             receipts_root: block.receipts_root.into(),
-            proof_of_work: self.calculate_pow_hash(updated_state),
+            proof_of_work: self.calculate_pow_hash(&block, execution_result)?,
         })
     }
 
@@ -134,11 +143,62 @@ where
         )
     }
 
-    /// Calculates POW hash based on the given trie state.
+    /// Calculates POW hash
     fn calculate_pow_hash(
         &self,
-        updated_state: reth_trie::HashedPostState,
-    ) -> did::hash::Hash<alloy_primitives::FixedBytes<32>> {
-        todo!()
+        block: &Block,
+        execution_result: ExecutionOutcome,
+    ) -> eyre::Result<did::hash::Hash<alloy_primitives::FixedBytes<32>>> {
+        let state = execution_result.bundle;
+        let state_provider = self.provider_factory.latest().expect("no latest provider");
+        let cache = StateCacheDb::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(
+            &state_provider,
+        )));
+
+        let mut state = StateBuilder::new()
+            .with_database_ref(&cache)
+            .with_bundle_prestate(state)
+            .with_bundle_update()
+            .build();
+
+        let chain_spec = self.provider_factory.chain_spec();
+        let evm_config = EthEvmConfig::new(chain_spec);
+
+        let EvmEnv { mut cfg_env_with_handler_cfg, block_env } =
+            evm_config.cfg_and_block_env(&block.header);
+
+        cfg_env_with_handler_cfg.cfg_env.disable_balance_check = true;
+
+        // Simple transaction
+        let tx = TxEnv {
+            caller: Address::from_slice(&[1]),
+            gas_limit: 21000,
+            gas_price: U256::from(1),
+            transact_to: alloy_primitives::TxKind::Call(Address::from_slice(&[2; 20])),
+            value: U256::from(1),
+            nonce: Some(0),
+            ..Default::default()
+        };
+
+        {
+            // Setup EVM
+            let mut evm = evm_config.evm_with_env(
+                &mut state,
+                EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, tx),
+            );
+
+            let res = evm.transact()?;
+            evm.db_mut().commit(res.state);
+            assert!(res.result.is_success());
+        }
+
+        let bundle = state.take_bundle();
+
+        let post_hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state());
+
+        let state_root = cache.db.state_root(post_hashed_state)?;
+
+        Ok(state_root.into())
     }
 }
