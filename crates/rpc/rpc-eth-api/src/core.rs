@@ -47,10 +47,21 @@ impl<T> FullEthApiServer for T where
 {
 }
 
+/// Bitfinity lag API
+pub const LAG_STATUS_BAD: &str = "LAGGING";
+
+/// Bitfinity lag API
+pub const LAG_STATUS_OK: &str = "ACCEPTED_LAG";
+
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
+    /// Bitfinity LB api extenstion
+    /// Handler for: `eth_lagging`
+    #[method(name = "lagging")]
+    async fn lagging(&self, accepted_lag: Option<U64>) -> RpcResult<String>;
+
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -386,6 +397,28 @@ where
     T: FullEthApi,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
 {
+    /// Handler for: `eth_lagging`
+    async fn lagging(&self, accepted_lag: Option<U64>) -> RpcResult<String> {
+        let accepted_lag = match accepted_lag {
+            Some(lag) => U256::from(lag),
+            // Assuming that lag behind for 3 block is ok
+            None => U256::from(3),
+        };
+
+        let network_block = BitfinityEvmRpc::network_block_number(self).await?;
+        let node_block = self.block_number()?;
+        let lag = network_block.saturating_sub(node_block);
+
+        let status =
+            if lag > accepted_lag { LAG_STATUS_BAD.to_owned() } else { LAG_STATUS_OK.to_owned() };
+
+        // Better to repond with string that add structure, import serde and stuff
+        let response =
+            format!("{}: lag: {} node: {} network: {}", status, lag, node_block, network_block);
+
+        Ok(response)
+    }
+
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> RpcResult<U64> {
         trace!(target: "rpc::eth", "Serving eth_protocolVersion");
