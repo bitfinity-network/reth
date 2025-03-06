@@ -20,6 +20,8 @@ pub trait BitfinityEvmRpc {
     fn network_block_number(&self) -> impl Future<Output = RpcResult<U256>> + Send {
         let chain_spec = self.chain_spec();
         async move {
+            // TODO: Expecting that client node would be the active data sorce at this time
+            // it could be primary or backup URL
             let (rpc_url, client) = get_client(&chain_spec)?;
 
             let block_number = client.get_block_number().await.map_err(|e| {
