@@ -394,7 +394,7 @@ where
     /// Handler for: `eth_lbLagCheck`
     async fn lb_lag_check(&self, accepted_lag: Option<U64>) -> RpcResult<String> {
         const LAG_STATUS_BAD: &str = "LAGGING";
-        const LAG_STATUS_OK: &str = "ACCEPTED_LAG";
+        const LAG_STATUS_OK: &str = "ACCEPTABLE_LAG";
         let network_block = match BitfinityEvmRpc::network_block_number(self).await {
             Ok(block) => block,
             Err(e) => {
