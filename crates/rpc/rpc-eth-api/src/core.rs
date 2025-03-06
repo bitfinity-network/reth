@@ -399,7 +399,7 @@ where
             Ok(block) => block,
             Err(e) => {
                 // Must not fail if rpc-url/evmc is not responding
-                // or it would to break nodes cluster -> LB will stop traffic
+                // or it could've disable all nodes under LB
                 tracing::error!(target: "rpc::eth", "Failed to get block number from the network. {}", e);
                 return Ok(format!("{}: NO_SOURCE", LAG_STATUS_OK));
             }

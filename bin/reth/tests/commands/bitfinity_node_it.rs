@@ -50,6 +50,57 @@ async fn bitfinity_test_should_start_local_reth_node() {
 }
 
 #[tokio::test]
+async fn bitfinity_test_lb_lag_check() {
+    // Arrange
+    let _log = init_logs();
+
+    let eth_server = EthImpl::new();
+    let (_server, eth_server_address) =
+        mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let (reth_client, _reth_node) =
+        start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
+
+    // Try `eth_lbLagCheck`
+    let result: String = reth_client
+        .single_request(
+            "eth_lbLagCheck".to_owned(),
+            ethereum_json_rpc_client::Params::Array(vec![10.into()]),
+            ethereum_json_rpc_client::Id::Num(1),
+        )
+        .await
+        .unwrap();
+
+    assert!(result.contains("ACCEPTED_LAG"), "{result:?}");
+
+    // Need time to generate extra blocks at `eth_server`
+    // Assuming it ticks 100ms for the next block
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+    let result: String = reth_client
+        .single_request(
+            "eth_lbLagCheck".to_owned(),
+            ethereum_json_rpc_client::Params::Array(vec![5.into()]),
+            ethereum_json_rpc_client::Id::Num(1),
+        )
+        .await
+        .unwrap();
+
+    assert!(result.contains("LAGGING"), "{result:?}");
+
+    // Default accepted lag is 3 so it should be lagging too
+    let result: String = reth_client
+        .single_request(
+            "eth_lbLagCheck".to_owned(),
+            ethereum_json_rpc_client::Params::None,
+            ethereum_json_rpc_client::Id::Num(1),
+        )
+        .await
+        .unwrap();
+
+    assert!(result.contains("LAGGING"), "{result:?}");
+}
+
+#[tokio::test]
 async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
     // Arrange
     let _log = init_logs();
