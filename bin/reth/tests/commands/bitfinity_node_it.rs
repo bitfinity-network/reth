@@ -73,8 +73,11 @@ async fn bitfinity_test_lb_lag_check() {
     assert!(result.contains("ACCEPTED_LAG"), "{result:?}");
 
     // Need time to generate extra blocks at `eth_server`
-    // Assuming it ticks 100ms for the next block
-    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    // Assuming `EthImpl` ticks 100ms for the each next block
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
+    for _ in 0..15 {
+        interval.tick().await;
+    }
 
     let result: String = reth_client
         .single_request(
