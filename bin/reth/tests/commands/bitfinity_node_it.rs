@@ -20,14 +20,13 @@ use reth_db::DatabaseEnv;
 use reth_db::{init_db, test_utils::tempdir_path};
 use reth_discv5::discv5::enr::secp256k1::{Keypair, Secp256k1};
 use reth_network::NetworkHandle;
-use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
+use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter, TreeConfig};
 use reth_node_builder::components::Components;
-use reth_node_builder::engine_tree_config::TreeConfig;
 use reth_node_builder::rpc::RpcAddOns;
 use reth_node_builder::{EngineNodeLauncher, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_ethereum::node::{EthereumAddOns, EthereumEngineValidatorBuilder};
 use reth_node_ethereum::{
-    BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory, EthereumNode,
+    BasicBlockExecutorProvider, EthEvmConfig, EthereumNode,
 };
 use reth_primitives::{Transaction, TransactionSigned};
 use reth_provider::providers::BlockchainProvider;
