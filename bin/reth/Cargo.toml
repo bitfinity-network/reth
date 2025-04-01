@@ -111,6 +111,7 @@ ethereum-json-rpc-client = { workspace = true, features = ["reqwest"] }
 jsonrpsee = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
+reth-evm = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 revm-primitives.workspace = true

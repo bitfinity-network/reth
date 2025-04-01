@@ -19,22 +19,20 @@ use reth_db::test_utils::TempDatabase;
 use reth_db::DatabaseEnv;
 use reth_db::{init_db, test_utils::tempdir_path};
 use reth_discv5::discv5::enr::secp256k1::{Keypair, Secp256k1};
-use reth_network::NetworkHandle;
+use reth_errors::ConsensusError;
+use reth_network::EthNetworkPrimitives;
 use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter, TreeConfig};
-use reth_node_builder::components::Components;
-use reth_node_builder::rpc::RpcAddOns;
 use reth_node_builder::{EngineNodeLauncher, NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
-use reth_node_ethereum::node::{EthereumAddOns, EthereumEngineValidatorBuilder};
+use reth_node_ethereum::node::EthereumAddOns;
 use reth_node_ethereum::{
     BasicBlockExecutorProvider, EthEvmConfig, EthereumNode,
 };
-use reth_primitives::{Transaction, TransactionSigned};
+use reth_primitives::{EthPrimitives, Transaction, TransactionSigned};
 use reth_provider::providers::BlockchainProvider;
-use reth_rpc::EthApi;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPooledTransaction,
-    EthTransactionValidator, Pool, TransactionValidationTaskExecutor,
+    EthTransactionValidator, TransactionValidationTaskExecutor,
 };
 use revm_primitives::{hex, Address, B256, U256};
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
@@ -318,6 +316,7 @@ fn sign_tx_with_random_key_pair(tx: Transaction) -> TransactionSigned {
 }
 
 fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigned {
+    use alloy_consensus::SignableTransaction;
     let signature = reth_primitives::sign_message(
         B256::from_slice(&key_pair.secret_bytes()[..]),
         tx.signature_hash(),
@@ -330,111 +329,8 @@ fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionSigne
 pub async fn start_reth_node(
     bitfinity_evm_url: Option<String>,
     import_data: Option<ImportData>,
-) -> (
-    EthJsonRpcClient<ReqwestClient>,
-    NodeHandle<
-        NodeAdapter<
-            FullNodeTypesAdapter<
-                EthereumNode,
-                Arc<TempDatabase<DatabaseEnv>>,
-                BlockchainProvider<
-                    NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
-                >,
-            >,
-            Components<
-                FullNodeTypesAdapter<
-                    EthereumNode,
-                    Arc<TempDatabase<DatabaseEnv>>,
-                    BlockchainProvider<
-                        NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
-                    >,
-                >,
-                reth_network::EthNetworkPrimitives,
-                Pool<
-                    TransactionValidationTaskExecutor<
-                        EthTransactionValidator<
-                            BlockchainProvider<
-                                NodeTypesWithDBAdapter<
-                                    EthereumNode,
-                                    Arc<TempDatabase<DatabaseEnv>>,
-                                >,
-                            >,
-                            EthPooledTransaction,
-                        >,
-                    >,
-                    CoinbaseTipOrdering<EthPooledTransaction>,
-                    DiskFileBlobStore,
-                >,
-                EthEvmConfig,
-                BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
-                Arc<dyn FullConsensus>,
-            >,
-        >,
-        RpcAddOns<
-            NodeAdapter<
-                FullNodeTypesAdapter<
-                    EthereumNode,
-                    Arc<TempDatabase<DatabaseEnv>>,
-                    BlockchainProvider<
-                        NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
-                    >,
-                >,
-                Components<
-                    FullNodeTypesAdapter<
-                        EthereumNode,
-                        Arc<TempDatabase<DatabaseEnv>>,
-                        BlockchainProvider<
-                            NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
-                        >,
-                    >,
-                    reth_network::EthNetworkPrimitives,
-                    Pool<
-                        TransactionValidationTaskExecutor<
-                            EthTransactionValidator<
-                                BlockchainProvider<
-                                    NodeTypesWithDBAdapter<
-                                        EthereumNode,
-                                        Arc<TempDatabase<DatabaseEnv>>,
-                                    >,
-                                >,
-                                EthPooledTransaction,
-                            >,
-                        >,
-                        CoinbaseTipOrdering<EthPooledTransaction>,
-                        DiskFileBlobStore,
-                    >,
-                    EthEvmConfig,
-                    BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
-                    Arc<dyn FullConsensus>,
-                >,
-            >,
-            EthApi<
-                BlockchainProvider<
-                    NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>,
-                >,
-                Pool<
-                    TransactionValidationTaskExecutor<
-                        EthTransactionValidator<
-                            BlockchainProvider<
-                                NodeTypesWithDBAdapter<
-                                    EthereumNode,
-                                    Arc<TempDatabase<DatabaseEnv>>,
-                                >,
-                            >,
-                            EthPooledTransaction,
-                        >,
-                    >,
-                    CoinbaseTipOrdering<EthPooledTransaction>,
-                    DiskFileBlobStore,
-                >,
-                NetworkHandle,
-                EthEvmConfig,
-            >,
-            EthereumEngineValidatorBuilder,
-        >,
-    >,
-    TaskManager,
-) {
+) -> (EthJsonRpcClient<ReqwestClient>, NodeHandle<NodeAdapter<FullNodeTypesAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>>>, reth_node_builder::components::Components<FullNodeTypesAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>>>, EthNetworkPrimitives, reth_transaction_pool::Pool<TransactionValidationTaskExecutor<EthTransactionValidator<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>>, EthPooledTransaction>>, CoinbaseTipOrdering<EthPooledTransaction>, DiskFileBlobStore>, EthEvmConfig, BasicBlockExecutorProvider<EthEvmConfig>, Arc<(dyn FullConsensus<EthPrimitives, Error = ConsensusError> + 'static)>>>, EthereumAddOns<NodeAdapter<FullNodeTypesAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>>>, reth_node_builder::components::Components<FullNodeTypesAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>>>, EthNetworkPrimitives, reth_transaction_pool::Pool<TransactionValidationTaskExecutor<EthTransactionValidator<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<TempDatabase<DatabaseEnv>>>>, EthPooledTransaction>>, CoinbaseTipOrdering<EthPooledTransaction>, DiskFileBlobStore>, EthEvmConfig, BasicBlockExecutorProvider<EthEvmConfig>, Arc<(dyn FullConsensus<EthPrimitives, Error = ConsensusError> + 'static)>>>>>, TaskManager)
+{
     let tasks = TaskManager::current();
 
     // create node config
@@ -776,9 +672,9 @@ pub mod eth_server {
             let tx = sign_tx_with_random_key_pair(MockTransaction::legacy().with_hash(hash).into());
             let did_tx = did::Transaction {
                 hash: hash.into(),
-                r: tx.signature.r().into(),
-                s: tx.signature.s().into(),
-                v: (tx.signature.recid().to_byte() as u64).into(),
+                r: tx.signature().r().into(),
+                s: tx.signature().s().into(),
+                v: (tx.signature().recid().to_byte() as u64).into(),
                 ..Default::default()
             };
 

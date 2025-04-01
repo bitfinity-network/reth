@@ -727,7 +727,7 @@ async-channel = "2"
 bitfinity-block-confirmation = { path = "crates/bitfinity-block-confirmation" }
 candid = "0.10"
 did = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "did", branch = "alloy_0_12" }
-dirs = "5.0.1"
+dirs = "6"
 ethereum-json-rpc-client = { git = "https://github.com/bitfinity-network/bitfinity-evm-sdk", package = "ethereum-json-rpc-client", branch = "alloy_0_12", features = [
     "reqwest",
 ] }
