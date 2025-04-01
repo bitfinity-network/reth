@@ -743,11 +743,13 @@ impl DownloadClient for BitfinityEvmClient {
 mod tests {
     use super::*;
 
+    const TESTNET_URL: &str = "https://block-extractor-testnet-1052151659755.europe-west9.run.app";
+
     #[tokio::test]
-    async fn bitfinity_remote_client_from_rpc_url() {
+    async fn bitfinity_test_remote_client_from_rpc_url() {
         let client = BitfinityEvmClient::from_rpc_url(
             RpcClientConfig {
-                primary_url: "https://cloudflare-eth.com".to_string(),
+                primary_url: TESTNET_URL.to_string(),
                 backup_url: None,
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
@@ -766,11 +768,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bitfinity_remote_client_from_backup_rpc_url() {
+    async fn bitfinity_test_remote_client_from_backup_rpc_url() {
         let client = BitfinityEvmClient::from_rpc_url(
             RpcClientConfig {
                 primary_url: "https://cloudflare.com".to_string(),
-                backup_url: Some("https://cloudflare-eth.com".to_string()),
+                backup_url: Some(TESTNET_URL.to_string()),
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
                 max_block_age_secs: Duration::from_secs(600),
@@ -791,7 +793,7 @@ mod tests {
     async fn bitfinity_test_headers_client() {
         let client = BitfinityEvmClient::from_rpc_url(
             RpcClientConfig {
-                primary_url: "https://cloudflare-eth.com".to_string(),
+                primary_url: TESTNET_URL.to_string(),
                 backup_url: None,
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
@@ -824,7 +826,7 @@ mod tests {
     async fn bitfinity_test_bodies_client() {
         let client = BitfinityEvmClient::from_rpc_url(
             RpcClientConfig {
-                primary_url: "https://cloudflare-eth.com".to_string(),
+                primary_url: TESTNET_URL.to_string(),
                 backup_url: None,
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
