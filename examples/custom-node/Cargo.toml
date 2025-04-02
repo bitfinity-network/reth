@@ -18,6 +18,7 @@ reth-optimism-forks.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
 reth-primitives-traits.workspace = true
+reth-rpc-api.workspace = true
 
 # revm
 revm-primitives.workspace = true
@@ -29,11 +30,15 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
+op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 
 # misc
+async-trait.workspace = true
 derive_more.workspace = true
+eyre.workspace = true
 serde.workspace = true
+jsonrpsee.workspace = true
 
 [features]
 default = []
@@ -41,6 +46,7 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
+    "op-alloy-consensus/arbitrary",
     "op-alloy-rpc-types-engine/arbitrary",
     "reth-chainspec/arbitrary",
     "reth-codecs/arbitrary",

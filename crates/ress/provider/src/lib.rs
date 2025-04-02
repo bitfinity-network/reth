@@ -1,5 +1,7 @@
 //! Reth implementation of [`reth_ress_protocol::RessProtocolProvider`].
 
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Bytes, B256};
 use parking_lot::Mutex;
@@ -26,7 +28,7 @@ mod pending_state;
 pub use pending_state::*;
 
 /// Reth provider implementing [`RessProtocolProvider`].
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct RethRessProtocolProvider<P, E> {
     provider: P,
     block_executor: E,
