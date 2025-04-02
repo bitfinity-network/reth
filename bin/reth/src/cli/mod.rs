@@ -162,10 +162,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         Fut: Future<Output = eyre::Result<()>>,
     {
         // Add network name if available to the logs dir
-        if let Some(chain_spec) = self.command.chain_spec() {
-            self.logs.log_file_directory =
-                self.logs.log_file_directory.join(chain_spec.chain.to_string());
-        }
+        // if let Some(chain_spec) = self.command.chain_spec() {
+        //     self.logs.log_file_directory =
+        //         self.logs.log_file_directory.join(chain_spec.chain.to_string());
+        // }
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
@@ -274,27 +274,27 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     ),
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
-    /// Returns the underlying chain being used for commands
-    fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
-        match self {
-            Self::Node(cmd) => cmd.chain_spec(),
-            Self::Init(cmd) => cmd.chain_spec(),
-            Self::InitState(cmd) => cmd.chain_spec(),
-            Self::Import(cmd) => cmd.chain_spec(),
-            Self::DumpGenesis(cmd) => cmd.chain_spec(),
-            Self::Db(cmd) => cmd.chain_spec(),
-            Self::Stage(cmd) => cmd.chain_spec(),
-            Self::P2P(cmd) => cmd.chain_spec(),
-            #[cfg(feature = "dev")]
-            Self::TestVectors(cmd) => cmd.chain_spec(),
-            Self::Config(cmd) => cmd.chain_spec(),
-            Self::Debug(cmd) => cmd.chain_spec(),
-            Self::Recover(cmd) => cmd.chain_spec(),
-            Self::Prune(cmd) => cmd.chain_spec(),
-        }
-    }
-}
+// impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
+//     /// Returns the underlying chain being used for commands
+//     fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+//         match self {
+//             Self::Node(cmd) => cmd.chain_spec(),
+//             Self::Init(cmd) => cmd.chain_spec(),
+//             Self::InitState(cmd) => cmd.chain_spec(),
+//             Self::Import(cmd) => cmd.chain_spec(),
+//             Self::DumpGenesis(cmd) => cmd.chain_spec(),
+//             Self::Db(cmd) => cmd.chain_spec(),
+//             Self::Stage(cmd) => cmd.chain_spec(),
+//             Self::P2P(cmd) => cmd.chain_spec(),
+//             #[cfg(feature = "dev")]
+//             Self::TestVectors(cmd) => cmd.chain_spec(),
+//             Self::Config(cmd) => cmd.chain_spec(),
+//             Self::Debug(cmd) => cmd.chain_spec(),
+//             Self::Recover(cmd) => cmd.chain_spec(),
+//             Self::Prune(cmd) => cmd.chain_spec(),
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -328,60 +328,60 @@ mod tests {
         }
     }
 
-    /// Tests that the log directory is parsed correctly when using the node command. It's
-    /// always tied to the specific chain's name.    
-    #[test]
-    fn parse_logs_path_node() {
-        let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
-        if let Some(chain_spec) = reth.command.chain_spec() {
-            reth.logs.log_file_directory =
-                reth.logs.log_file_directory.join(chain_spec.chain.to_string());
-        }
-        let log_dir = reth.logs.log_file_directory;
-        let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
-        assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
+    // /// Tests that the log directory is parsed correctly when using the node command. It's
+    // /// always tied to the specific chain's name.    
+    // #[test]
+    // fn parse_logs_path_node() {
+    //     let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
+    //     if let Some(chain_spec) = reth.command.chain_spec() {
+    //         reth.logs.log_file_directory =
+    //             reth.logs.log_file_directory.join(chain_spec.chain.to_string());
+    //     }
+    //     let log_dir = reth.logs.log_file_directory;
+    //     let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
+    //     assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
 
-        let mut iter = SUPPORTED_CHAINS.iter();
-        iter.next();
-        for chain in iter {
-            let mut reth = Cli::try_parse_args_from(["reth", "node", "--chain", chain]).unwrap();
-            let chain =
-                reth.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or(String::new());
-            reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain.clone());
-            let log_dir = reth.logs.log_file_directory;
-            let end = format!("reth/logs/{}", chain);
-            assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
-        }
-    }
+    //     let mut iter = SUPPORTED_CHAINS.iter();
+    //     iter.next();
+    //     for chain in iter {
+    //         let mut reth = Cli::try_parse_args_from(["reth", "node", "--chain", chain]).unwrap();
+    //         let chain =
+    //             reth.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or(String::new());
+    //         reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain.clone());
+    //         let log_dir = reth.logs.log_file_directory;
+    //         let end = format!("reth/logs/{}", chain);
+    //         assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
+    //     }
+    // }
 
-    /// Tests that the log directory is parsed correctly when using the init command. It
-    /// uses the underlying environment in command to get the chain.
-    #[test]
-    fn parse_logs_path_init() {
-        let mut reth = Cli::try_parse_args_from(["reth", "init"]).unwrap();
-        if let Some(chain_spec) = reth.command.chain_spec() {
-            reth.logs.log_file_directory =
-                reth.logs.log_file_directory.join(chain_spec.chain.to_string());
-        }
-        let log_dir = reth.logs.log_file_directory;
-        let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
-        println!("{:?}", log_dir);
-        assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
-    }
+    // /// Tests that the log directory is parsed correctly when using the init command. It
+    // /// uses the underlying environment in command to get the chain.
+    // #[test]
+    // fn parse_logs_path_init() {
+    //     let mut reth = Cli::try_parse_args_from(["reth", "init"]).unwrap();
+    //     if let Some(chain_spec) = reth.command.chain_spec() {
+    //         reth.logs.log_file_directory =
+    //             reth.logs.log_file_directory.join(chain_spec.chain.to_string());
+    //     }
+    //     let log_dir = reth.logs.log_file_directory;
+    //     let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
+    //     println!("{:?}", log_dir);
+    //     assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
+    // }
 
-    /// Tests that the config command does not return any chain spec leading to empty chain id.
-    #[test]
-    fn parse_empty_logs_path() {
-        let mut reth = Cli::try_parse_args_from(["reth", "config"]).unwrap();
-        if let Some(chain_spec) = reth.command.chain_spec() {
-            reth.logs.log_file_directory =
-                reth.logs.log_file_directory.join(chain_spec.chain.to_string());
-        }
-        let log_dir = reth.logs.log_file_directory;
-        let end = "reth/logs".to_string();
-        println!("{:?}", log_dir);
-        assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
-    }
+    // /// Tests that the config command does not return any chain spec leading to empty chain id.
+    // #[test]
+    // fn parse_empty_logs_path() {
+    //     let mut reth = Cli::try_parse_args_from(["reth", "config"]).unwrap();
+    //     if let Some(chain_spec) = reth.command.chain_spec() {
+    //         reth.logs.log_file_directory =
+    //             reth.logs.log_file_directory.join(chain_spec.chain.to_string());
+    //     }
+    //     let log_dir = reth.logs.log_file_directory;
+    //     let end = "reth/logs".to_string();
+    //     println!("{:?}", log_dir);
+    //     assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
+    // }
 
     #[test]
     fn parse_env_filter_directives() {

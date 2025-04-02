@@ -323,9 +323,8 @@ mod tests {
     use alloy_primitives::{hex::FromHex, Address};
 
     use alloy_signer::Signer;
-    use did::{constant::EIP1559_INITIAL_BASE_FEE, U256};
+    use did::{constant::EIP1559_INITIAL_BASE_FEE, rpc::{id::Id, request::RpcRequest, response::{Response, RpcResponse, Success}, version::Version}, U256};
 
-    use jsonrpc_core::{Output, Request, Response, Success, Version};
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chainspec::{
         BaseFeeParams, ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS,
@@ -368,15 +367,15 @@ mod tests {
     impl Client for MockClient {
         fn send_rpc_request(
             &self,
-            _request: Request,
-        ) -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<Response>> + Send>> {
+            _request: RpcRequest,
+        ) -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<RpcResponse>> + Send>> {
             let genesis_accounts = self.genesis_accounts.clone();
 
             Box::pin(async move {
-                let response = Response::Single(Output::Success(Success {
+                let response = RpcResponse::Single(Response::Success(Success {
                     jsonrpc: Some(Version::V2),
                     result: serde_json::json!(genesis_accounts),
-                    id: jsonrpc_core::Id::Null,
+                    id: Id::Null,
                 }));
 
                 anyhow::Ok(response)
@@ -535,19 +534,7 @@ mod tests {
     fn setup_test_block_validator(
         extended_genesis: Option<(Address, did::U256)>,
     ) -> (
-        BitfinityBlockConfirmation<
-            MockClient,
-            NodeTypesWithDBAdapter<
-                AnyNodeTypesWithEngine<
-                    EthPrimitives,
-                    EthEngineTypes,
-                    ChainSpec,
-                    MerklePatriciaTrie,
-                    EthStorage,
-                >,
-                Arc<TempDatabase<DatabaseEnv>>,
-            >,
-        >,
+        BitfinityBlockConfirmation<MockClient, NodeTypesWithDBAdapter<AnyNodeTypesWithEngine<EthPrimitives, EthEngineTypes, ChainSpec, MerklePatriciaTrie, EthStorage, EthEngineTypes>, Arc<TempDatabase<DatabaseEnv>>>>,
         RecoveredBlock<Block>,
     ) {
         // EVM genesis accounts (similar to the test genesis in EVM)

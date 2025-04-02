@@ -2,7 +2,7 @@
 //! Integration tests for the bitfinity node command.
 
 use super::utils::*;
-use did::keccak;
+use did::{keccak, rpc::{id::Id, params::Params}};
 use eth_server::{EthImpl, EthServer};
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, CertifiedResult, EthJsonRpcClient};
 use jsonrpsee::{
@@ -62,8 +62,8 @@ async fn bitfinity_test_lb_lag_check() {
     let result: String = reth_client
         .single_request(
             "eth_lbLagCheck".to_owned(),
-            ethereum_json_rpc_client::Params::Array(vec![10.into()]),
-            ethereum_json_rpc_client::Id::Num(1),
+            Params::Array(vec![10.into()]),
+            Id::Number(1),
         )
         .await
         .unwrap();
@@ -80,8 +80,8 @@ async fn bitfinity_test_lb_lag_check() {
         let result = reth_client
             .single_request::<String>(
                 "eth_lbLagCheck".to_owned(),
-                ethereum_json_rpc_client::Params::Array(vec![5.into()]),
-                ethereum_json_rpc_client::Id::Num(1),
+                Params::Array(vec![5.into()]),
+                Id::Number(1),
             )
             .await;
         if let Ok(message) = result {
@@ -98,8 +98,8 @@ async fn bitfinity_test_lb_lag_check() {
     let result: String = reth_client
         .single_request(
             "eth_lbLagCheck".to_owned(),
-            ethereum_json_rpc_client::Params::Array(vec![1000.into()]),
-            ethereum_json_rpc_client::Id::Num(1),
+            Params::Array(vec![1000.into()]),
+            Id::Number(1),
         )
         .await
         .unwrap();
@@ -115,8 +115,8 @@ async fn bitfinity_test_lb_lag_check_fail_safe() {
     let message: String = reth_client
         .single_request(
             "eth_lbLagCheck".to_owned(),
-            ethereum_json_rpc_client::Params::Array(vec![1000.into()]),
-            ethereum_json_rpc_client::Id::Num(1),
+            Params::Array(vec![1000.into()]),
+            Id::Number(1),
         )
         .await
         .unwrap();
@@ -147,8 +147,8 @@ async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
     let result: CertifiedResult<did::Block<did::H256>> = reth_client
         .single_request(
             "eth_getLastCertifiedBlock".to_owned(),
-            ethereum_json_rpc_client::Params::None,
-            ethereum_json_rpc_client::Id::Num(1),
+            Params::None,
+            Id::Number(1),
         )
         .await
         .unwrap();
@@ -213,8 +213,8 @@ async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
     let result: Vec<(did::H160, did::U256)> = reth_client
         .single_request(
             "eth_getGenesisBalances".to_owned(),
-            ethereum_json_rpc_client::Params::None,
-            ethereum_json_rpc_client::Id::Num(1),
+            Params::None,
+            Id::Number(1),
         )
         .await
         .unwrap();
