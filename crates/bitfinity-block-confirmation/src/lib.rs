@@ -9,9 +9,7 @@ use reth_evm::{
     execute::{BasicBlockExecutor, BlockExecutorProvider, Executor},
     ConfigureEvm, Evm,
 };
-use reth_evm_ethereum::{
-    execute::EthExecutorProvider, EthEvmConfig
-};
+use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::Block;
 use reth_primitives_traits::block::RecoveredBlock;
@@ -20,12 +18,12 @@ use tracing::{debug, error, info, trace};
 use reth_provider::{
     providers::ProviderNodeTypes, ChainSpecProvider as _, ExecutionOutcome, ProviderFactory,
 };
-use reth_revm::{context::TxEnv, db::{states::bundle_state::BundleRetention, StateBuilder}};
-
 use reth_revm::{
-    database::StateProviderDatabase,
-    DatabaseCommit,
+    context::TxEnv,
+    db::{states::bundle_state::BundleRetention, StateBuilder},
 };
+
+use reth_revm::{database::StateProviderDatabase, DatabaseCommit};
 use reth_rpc_eth_types::{cache::db::StateProviderTraitObjWrapper, StateCacheDb};
 use reth_trie::{HashedPostState, KeccakKeyHasher, StateRoot};
 use reth_trie_db::DatabaseStateRoot;
@@ -48,7 +46,7 @@ where
 impl<C, DB> BitfinityBlockConfirmation<C, DB>
 where
     C: Client,
-    DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
+    DB: NodeTypesWithDB<ChainSpec=reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
 {
     /// Create a new [`BitfinityBlockConfirmation`].
     pub const fn new(
@@ -149,7 +147,8 @@ where
             "Executing {} blocks", blocks.len()
         );
         let executor = self.executor();
-        let blocks_with_senders: eyre::Result<Vec<_>> = blocks.iter().map(Self::convert_block).collect();
+        let blocks_with_senders: eyre::Result<Vec<_>> =
+            blocks.iter().map(Self::convert_block).collect();
         let blocks_with_senders = blocks_with_senders?;
 
         let output = executor.execute_batch(&blocks_with_senders)?;
@@ -172,25 +171,31 @@ where
             .enumerate()
             .map(|(index, tx)| {
                 tx.recover_signer().map_err(|err| {
-                    eyre!("Failed to recover sender for transaction {index} with hash {:?}", tx.hash()).wrap_err(err)
+                    eyre!(
+                        "Failed to recover sender for transaction {index} with hash {:?}",
+                        tx.hash()
+                    )
+                        .wrap_err(err)
                 })
             })
             .collect();
         let senders = senders?;
 
-        Ok(RecoveredBlock::new_unhashed(block.clone(), senders ))
+        Ok(RecoveredBlock::new_unhashed(block.clone(), senders))
     }
 
     /// Get the block executor for the latest block.
     fn executor(
         &self,
-    ) -> BasicBlockExecutor<EthEvmConfig, StateProviderDatabase<reth_chain_state::MemoryOverlayStateProviderRef<'_>>> {
-
+    ) -> BasicBlockExecutor<
+        EthEvmConfig,
+        StateProviderDatabase<reth_chain_state::MemoryOverlayStateProviderRef<'_>>,
+    > {
         let historical = self.provider_factory.latest().expect("no latest provider");
         let db = MemoryOverlayStateProvider::new(historical, Vec::new());
 
         EthExecutorProvider::ethereum(self.provider_factory.chain_spec())
-                .executor(StateProviderDatabase::new(db))
+            .executor(StateProviderDatabase::new(db))
     }
 
     /// Calculates POW hash
@@ -235,17 +240,13 @@ where
         let pow_tx =
             did::utils::block_confirmation_pow_transaction(from.clone(), base_fee, None, None);
 
-        // Simple transaction
-        let kind = match pow_tx.to {
-            Some(to) => TxKind::Call(to.0),
-            None => TxKind::Create,
-        };
         let tx = TxEnv {
             caller: pow_tx.from.into(),
             gas_limit: pow_tx.gas.0.to(),
             gas_price: pow_tx.gas_price.unwrap_or_default().0.to(),
-            kind: kind,
+            kind: TxKind::from(pow_tx.to.map(Into::into)),
             value: pow_tx.value.0,
+            gas_priority_fee: None,
             ..Default::default()
         };
 
@@ -258,10 +259,7 @@ where
             let chain_spec = self.provider_factory.chain_spec();
             let evm_config = EthEvmConfig::new(chain_spec);
             let evm_env = evm_config.evm_env(&block.header);
-            let mut evm = evm_config.evm_with_env(
-                &mut state,
-                evm_env,
-            );
+            let mut evm = evm_config.evm_with_env(&mut state, evm_env);
 
             debug!(
                 target: "bitfinity_block_confirmation::BitfinityBlockConfirmation",
@@ -315,7 +313,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use alloy_consensus::{BlockHeader, Header, SignableTransaction, TxEip2930};
     use alloy_genesis::{Genesis, GenesisAccount};
 
@@ -323,7 +320,16 @@ mod tests {
     use alloy_primitives::{hex::FromHex, Address};
 
     use alloy_signer::Signer;
-    use did::{constant::EIP1559_INITIAL_BASE_FEE, rpc::{id::Id, request::RpcRequest, response::{Response, RpcResponse, Success}, version::Version}, U256};
+    use did::{
+        constant::EIP1559_INITIAL_BASE_FEE,
+        rpc::{
+            id::Id,
+            request::RpcRequest,
+            response::{Response, RpcResponse, Success},
+            version::Version,
+        },
+        U256,
+    };
 
     use reth_chain_state::test_utils::TestBlockBuilder;
     use reth_chainspec::{
@@ -340,9 +346,7 @@ mod tests {
     use super::*;
 
     use reth_node_types::{AnyNodeTypesWithEngine, FullNodePrimitives, NodeTypesWithDBAdapter};
-    use reth_primitives::{
-        Block, BlockBody, EthPrimitives, Receipt, TransactionSigned
-    };
+    use reth_primitives::{Block, BlockBody, EthPrimitives, Receipt, TransactionSigned};
     use reth_provider::{
         test_utils::create_test_provider_factory_with_chain_spec, BlockExecutionOutput,
         BlockReader, BlockWriter, DatabaseProviderFactory, EthStorage, HashedPostStateProvider,
@@ -368,7 +372,7 @@ mod tests {
         fn send_rpc_request(
             &self,
             _request: RpcRequest,
-        ) -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<RpcResponse>> + Send>> {
+        ) -> std::pin::Pin<Box<dyn Future<Output=anyhow::Result<RpcResponse>> + Send>> {
             let genesis_accounts = self.genesis_accounts.clone();
 
             Box::pin(async move {
@@ -391,7 +395,7 @@ mod tests {
         transactions: Vec<TransactionSigned>,
     ) -> eyre::Result<RecoveredBlock<Block>>
     where
-        DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
+        DB: NodeTypesWithDB<ChainSpec=reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
     {
         use reth_primitives_traits::Block as _;
         let parent_block = provider_factory
@@ -420,8 +424,8 @@ mod tests {
             },
             body: BlockBody { transactions, ..Default::default() },
         }
-        .try_into_recovered()
-        .expect("failed to recover senders");
+            .try_into_recovered()
+            .expect("failed to recover senders");
 
         Ok(block)
     }
@@ -433,7 +437,7 @@ mod tests {
         provider_factory: &ProviderFactory<DB>,
     ) -> eyre::Result<RecoveredBlock<Block>>
     where
-        DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
+        DB: NodeTypesWithDB<ChainSpec=reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
     {
         make_block(block_number, parent_hash, provider_factory, 0, vec![])
     }
@@ -446,7 +450,7 @@ mod tests {
         nonce: u64,
     ) -> eyre::Result<RecoveredBlock<Block>>
     where
-        DB: NodeTypesWithDB<ChainSpec = reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
+        DB: NodeTypesWithDB<ChainSpec=reth_chainspec::ChainSpec> + ProviderNodeTypes + Clone,
     {
         let chain_spec = provider_factory.chain_spec();
         let mut signer = alloy_signer_local::PrivateKeySigner::from_slice(&[1; 32])?;
@@ -491,9 +495,9 @@ mod tests {
     where
         N: ProviderNodeTypes<
             Primitives: FullNodePrimitives<
-                Block = reth_primitives::Block,
-                BlockBody = reth_primitives::BlockBody,
-                Receipt = reth_primitives::Receipt,
+                Block=reth_primitives::Block,
+                BlockBody=reth_primitives::BlockBody,
+                Receipt=reth_primitives::Receipt,
             >,
         >,
     {
@@ -534,7 +538,20 @@ mod tests {
     fn setup_test_block_validator(
         extended_genesis: Option<(Address, did::U256)>,
     ) -> (
-        BitfinityBlockConfirmation<MockClient, NodeTypesWithDBAdapter<AnyNodeTypesWithEngine<EthPrimitives, EthEngineTypes, ChainSpec, MerklePatriciaTrie, EthStorage, EthEngineTypes>, Arc<TempDatabase<DatabaseEnv>>>>,
+        BitfinityBlockConfirmation<
+            MockClient,
+            NodeTypesWithDBAdapter<
+                AnyNodeTypesWithEngine<
+                    EthPrimitives,
+                    EthEngineTypes,
+                    ChainSpec,
+                    MerklePatriciaTrie,
+                    EthStorage,
+                    EthEngineTypes,
+                >,
+                Arc<TempDatabase<DatabaseEnv>>,
+            >,
+        >,
         RecoveredBlock<Block>,
     ) {
         // EVM genesis accounts (similar to the test genesis in EVM)
@@ -616,13 +633,11 @@ mod tests {
                 genesis_block.hash_slow().into(),
                 &block_validator.provider_factory,
             )
-            .unwrap();
+                .unwrap();
 
             // Insert the test block into the database.
             let provider_rw = block_validator.provider_factory.database_provider_rw().unwrap();
-            provider_rw
-                .insert_block(test_block.clone(), StorageLocation::Database)
-                .unwrap();
+            provider_rw.insert_block(test_block.clone(), StorageLocation::Database).unwrap();
             provider_rw.commit().unwrap();
 
             test_block
@@ -634,8 +649,10 @@ mod tests {
                 .unwrap();
 
         // Calculate the POW hash.
-        let pow =
-            block_validator.compute_pow_hash(&block1.clone_block(), ExecutionOutcome::default()).await.unwrap();
+        let pow = block_validator
+            .compute_pow_hash(&block1.clone_block(), ExecutionOutcome::default())
+            .await
+            .unwrap();
 
         assert_ne!(pow.0, KECCAK_EMPTY, "Proof of work hash should not be empty");
 
@@ -658,7 +675,9 @@ mod tests {
             .get_executed_block_with_number(genesis_block.number + 1, genesis_block.hash_slow());
 
         let outcome = block.execution_outcome();
-        let pow_res = block_validator.compute_pow_hash(&block.recovered_block().clone_block(), outcome.clone()).await;
+        let pow_res = block_validator
+            .compute_pow_hash(&block.recovered_block().clone_block(), outcome.clone())
+            .await;
 
         assert!(pow_res.is_ok());
 
@@ -675,8 +694,14 @@ mod tests {
         let outcome = block.execution_outcome();
 
         // Compute POW hash twice with the same input
-        let pow1 = block_validator.compute_pow_hash(&block.recovered_block().clone_block(), outcome.clone()).await.unwrap();
-        let pow2 = block_validator.compute_pow_hash(&block.recovered_block().clone_block(), outcome.clone()).await.unwrap();
+        let pow1 = block_validator
+            .compute_pow_hash(&block.recovered_block().clone_block(), outcome.clone())
+            .await
+            .unwrap();
+        let pow2 = block_validator
+            .compute_pow_hash(&block.recovered_block().clone_block(), outcome.clone())
+            .await
+            .unwrap();
 
         // Results should be deterministic
         assert_eq!(pow1, pow2, "POW hash computation should be deterministic");
@@ -721,7 +746,7 @@ mod tests {
         let expected_pow_hash = did::H256::from_hex_str(
             "0xe66caa3a5bf8a22c38c33e5fb4cab1bd1b34e9734526a8723c615e9d36ccc45b",
         )
-        .unwrap();
+            .unwrap();
 
         let (block_validator, genesis_block) = setup_test_block_validator(None);
 
@@ -731,13 +756,13 @@ mod tests {
                 genesis_block.hash_slow().into(),
                 &block_validator.provider_factory,
             )
-            .unwrap();
+                .unwrap();
             execute_block_and_commit_to_database(
                 &block_validator.provider_factory,
                 block_validator.provider_factory.chain_spec().clone(),
                 &block,
             )
-            .unwrap();
+                .unwrap();
 
             block
         };
@@ -752,7 +777,7 @@ mod tests {
                 block_validator.provider_factory.chain_spec().clone(),
                 &block,
             )
-            .unwrap();
+                .unwrap();
 
             block
         };
@@ -766,7 +791,7 @@ mod tests {
             block_validator.provider_factory.chain_spec().clone(),
             &block,
         )
-        .unwrap();
+            .unwrap();
         let outcome = to_execution_outcome(block.number, &block_output);
 
         // Compute POW hash for two different blocks
@@ -785,7 +810,7 @@ mod tests {
         let expected_pow_hash = did::H256::from_hex_str(
             "0xa349b3ca25925decd1c225b8bc3a133c436f3989eb8048e93ee1389c78a1d6a4",
         )
-        .unwrap();
+            .unwrap();
 
         let signer = alloy_signer_local::PrivateKeySigner::from_slice(&[1; 32]).unwrap();
 
@@ -799,13 +824,13 @@ mod tests {
                 &block_validator.provider_factory,
                 0,
             )
-            .unwrap();
+                .unwrap();
             execute_block_and_commit_to_database(
                 &block_validator.provider_factory,
                 block_validator.provider_factory.chain_spec().clone(),
                 &block,
             )
-            .unwrap();
+                .unwrap();
 
             block
         };
@@ -817,13 +842,13 @@ mod tests {
                 &block_validator.provider_factory,
                 1,
             )
-            .unwrap();
+                .unwrap();
             let out = execute_block_and_commit_to_database(
                 &block_validator.provider_factory,
                 block_validator.provider_factory.chain_spec().clone(),
                 &block,
             )
-            .unwrap();
+                .unwrap();
 
             to_execution_outcome(block.number, &out);
             block
@@ -835,13 +860,13 @@ mod tests {
             &block_validator.provider_factory,
             2,
         )
-        .unwrap();
+            .unwrap();
         let block_output = execute_block_and_commit_to_database(
             &block_validator.provider_factory,
             block_validator.provider_factory.chain_spec().clone(),
             &block,
         )
-        .unwrap();
+            .unwrap();
 
         let outcome = to_execution_outcome(block.number, &block_output);
 
