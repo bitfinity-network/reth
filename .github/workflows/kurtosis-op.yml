@@ -5,8 +5,11 @@ name: kurtosis-op
 on:
   workflow_dispatch:
   schedule:
-    # run every 12 hours
     - cron: "0 */12 * * *"
+
+  push:
+    tags:
+      - '*'
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,7 +24,7 @@ jobs:
     with:
       image_tag: ghcr.io/paradigmxyz/op-reth:kurtosis-ci
       binary_name: op-reth
-      cargo_features: optimism,asm-keccak
+      cargo_features: asm-keccak
       cargo_package: crates/optimism/bin/Cargo.toml
 
   test:

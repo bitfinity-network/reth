@@ -503,7 +503,6 @@ fn compute_state_root(genesis_balances: &[(Address, U256)]) -> H256 {
             ..Default::default()
         },
         hardforks: Default::default(),
-        genesis_hash: Default::default(),
         paris_block_and_final_difficulty: None,
         deposit_contract: None,
         ..Default::default()

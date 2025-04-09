@@ -2,17 +2,15 @@
 //! Utils for bitfinity integration tests
 //!
 use std::{
-    fmt::{Debug, Display, Formatter},
+    fmt::{Debug, Formatter},
     path::PathBuf,
     str::FromStr,
     sync::Arc,
     time,
 };
 
-use alloy_eips::eip7685::Requests;
 use alloy_primitives::BlockNumber;
 use lightspeed_scheduler::JobExecutor;
-use parking_lot::Mutex;
 use reth::{
     args::{BitfinityImportArgs, IC_MAINNET_KEY},
     commands::bitfinity_import::BitfinityImportCommand,
@@ -21,20 +19,18 @@ use reth::{
 use reth_chainspec::ChainSpec;
 use reth_db::{init_db, DatabaseEnv};
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
-use reth_errors::BlockExecutionError;
-use reth_evm::execute::{BatchExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor};
+
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use reth_provider::{
-    providers::{BlockchainProvider2, StaticFileProvider},
-    BlockNumReader, ExecutionOutcome, ProviderError, ProviderFactory,
+    providers::{BlockchainProvider, StaticFileProvider},
+    BlockNumReader, ProviderFactory,
 };
-use reth_prune::PruneModes;
 use reth_tracing::{FileWorkerGuard, LayerInfo, LogFormat, RethTracer, Tracer};
-use revm_primitives::db::Database;
 use tempfile::TempDir;
 use tracing::{debug, info};
+
+pub use reth_evm::test_utils::MockExecutorProvider;
 
 /// Local EVM canister ID for testing.
 pub const LOCAL_EVM_CANISTER_ID: &str = "bkyz2-fmaaa-aaaaa-qaaaq-cai";
@@ -73,7 +69,7 @@ pub struct ImportData {
     /// The provider factory.
     pub provider_factory: ProviderFactory<NodeTypes>,
     /// The blockchain provider.
-    pub blockchain_db: BlockchainProvider2<NodeTypes>,
+    pub blockchain_db: BlockchainProvider<NodeTypes>,
     /// The bitfinity import arguments.
     pub bitfinity_args: BitfinityImportArgs,
 }
@@ -144,7 +140,7 @@ pub async fn bitfinity_import_config_data(
 
     reth_db_common::init::init_genesis(&provider_factory)?;
 
-    let blockchain_db = BlockchainProvider2::new(provider_factory.clone())?;
+    let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
 
     let bitfinity_args = BitfinityImportArgs {
         rpc_url: evm_datasource_url.to_string(),
@@ -199,101 +195,4 @@ pub fn get_dfx_local_port() -> u16 {
     let port = String::from_utf8_lossy(&output.stdout);
     info!("dfx port: {}", port);
     u16::from_str(port.trim()).unwrap()
-}
-
-/// A [`BlockExecutorProvider`] that returns mocked execution results.
-/// Original code taken from ./`crates/evm/src/test_utils.rs`
-#[derive(Clone, Debug, Default)]
-pub struct MockExecutorProvider {
-    exec_results: Arc<Mutex<Vec<ExecutionOutcome>>>,
-}
-
-impl BlockExecutorProvider for MockExecutorProvider {
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
-
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
-
-    fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
-    where
-        DB: Database<Error: Into<ProviderError> + Display>,
-    {
-        self.clone()
-    }
-
-    fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
-    where
-        DB: Database<Error: Into<ProviderError> + Display>,
-    {
-        self.clone()
-    }
-
-    type Primitives = EthPrimitives;
-}
-
-impl<DB> Executor<DB> for MockExecutorProvider {
-    type Input<'a> = &'a BlockWithSenders;
-    type Output = BlockExecutionOutput<Receipt>;
-    type Error = BlockExecutionError;
-
-    fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        let ExecutionOutcome { bundle, receipts, requests, first_block: _ } =
-            self.exec_results.lock().pop().unwrap();
-        Ok(BlockExecutionOutput {
-            state: bundle,
-            receipts: receipts.into_iter().flatten().flatten().collect(),
-            requests: Requests::new(requests.into_iter().flatten().collect()),
-            gas_used: 0,
-        })
-    }
-
-    fn execute_with_state_closure<F>(
-        self,
-        _input: Self::Input<'_>,
-        _state: F,
-    ) -> Result<Self::Output, Self::Error>
-    where
-        F: FnMut(&reth_revm::State<DB>),
-    {
-        let ExecutionOutcome { bundle, receipts, requests, first_block: _ } =
-            self.exec_results.lock().pop().unwrap();
-        Ok(BlockExecutionOutput {
-            state: bundle,
-            receipts: receipts.into_iter().flatten().flatten().collect(),
-            requests: Requests::new(requests.into_iter().flatten().collect()),
-            gas_used: 0,
-        })
-    }
-
-    fn execute_with_state_hook<F>(
-        self,
-        _input: Self::Input<'_>,
-        _state_hook: F,
-    ) -> Result<Self::Output, Self::Error>
-    where
-        F: reth_evm::system_calls::OnStateHook + 'static,
-    {
-        todo!()
-    }
-}
-
-impl<DB> BatchExecutor<DB> for MockExecutorProvider {
-    type Input<'a> = &'a BlockWithSenders;
-    type Output = ExecutionOutcome;
-    type Error = BlockExecutionError;
-
-    fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    fn finalize(self) -> Self::Output {
-        self.exec_results.lock().pop().unwrap()
-    }
-
-    fn set_tip(&mut self, _: BlockNumber) {}
-
-    fn size_hint(&self) -> Option<usize> {
-        None
-    }
-
-    fn set_prune_modes(&mut self, _prune_modes: PruneModes) {}
 }
