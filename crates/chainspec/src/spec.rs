@@ -1,6 +1,7 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 use alloy_evm::eth::spec::EthExecutorSpec;
 
+use crate::bitfinity_spec::BitfinitySpec;
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
     EthChainSpec,
@@ -113,7 +114,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
         blob_params: HardforkBlobParams::default(),
-        bitfinity_evm_url: Default::default(),
+        bitfinity_spec: Default::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -143,7 +144,7 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
         blob_params: HardforkBlobParams::default(),
-        bitfinity_evm_url: Default::default(),
+        bitfinity_spec: Default::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -171,7 +172,7 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
         blob_params: HardforkBlobParams::default(),
-        bitfinity_evm_url: Default::default(),
+        bitfinity_spec: Default::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -201,7 +202,7 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
         blob_params: HardforkBlobParams::default(),
-        bitfinity_evm_url: Default::default(),
+        bitfinity_spec: Default::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -335,9 +336,9 @@ pub struct ChainSpec {
 
     /// The settings passed for blob configurations for specific hardforks.
     pub blob_params: HardforkBlobParams,
-    
-    /// The URL of the Bitfinity EVM RPC endpoint
-    pub bitfinity_evm_url: Option<String>,
+
+    /// Bitfinity Specific Configuration
+    pub bitfinity_spec: BitfinitySpec,
 }
 
 impl Default for ChainSpec {
@@ -352,7 +353,7 @@ impl Default for ChainSpec {
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
             blob_params: Default::default(),
-            bitfinity_evm_url: Default::default(),
+            bitfinity_spec: Default::default(),
         }
     }
 }
@@ -423,7 +424,7 @@ impl ChainSpec {
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.hardforks.is_fork_active_at_timestamp(fork.clone(), timestamp) {
-                        return *params
+                        return *params;
                     }
                 }
 
@@ -442,7 +443,7 @@ impl ChainSpec {
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.hardforks.is_fork_active_at_block(fork.clone(), block_number) {
-                        return *params
+                        return *params;
                     }
                 }
 
@@ -516,8 +517,8 @@ impl ChainSpec {
             // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
             // fork filter.
             Some(match condition {
-                ForkCondition::Block(block) |
-                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
+                ForkCondition::Block(block)
+                | ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
                 ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
                 _ => return None,
             })
@@ -544,8 +545,8 @@ impl ChainSpec {
         for (_, cond) in self.hardforks.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
-            if let ForkCondition::Block(block) |
-            ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            if let ForkCondition::Block(block)
+            | ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if head.number >= block {
                     // skip duplicated hardforks: hardforks enabled at genesis block
@@ -556,7 +557,7 @@ impl ChainSpec {
                 } else {
                     // we can return here because this block fork is not active, so we set the
                     // `next` value
-                    return ForkId { hash: forkhash, next: block }
+                    return ForkId { hash: forkhash, next: block };
                 }
             }
         }
@@ -578,7 +579,7 @@ impl ChainSpec {
                 // can safely return here because we have already handled all block forks and
                 // have handled all active timestamp forks, and set the next value to the
                 // timestamp that is known but not active yet
-                return ForkId { hash: forkhash, next: timestamp }
+                return ForkId { hash: forkhash, next: timestamp };
             }
         }
 

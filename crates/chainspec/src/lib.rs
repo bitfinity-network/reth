@@ -13,6 +13,7 @@ extern crate alloc;
 
 /// Chain specific constants
 mod constants;
+pub mod bitfinity_spec;
 pub use constants::*;
 
 mod api;

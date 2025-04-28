@@ -10,8 +10,10 @@ use ic_certificate_verification::VerifyCertificate;
 use ic_certification::{Certificate, HashTree, LookupResult};
 use itertools::Either;
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
+use reth_chainspec::bitfinity_spec::BitfinitySpec;
 use reth_chainspec::{
-    make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks, ChainSpec, EthereumHardfork, Hardfork
+    make_genesis_header, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks, ChainSpec,
+    EthereumHardfork, Hardfork,
 };
 
 use alloy_rlp::Decodable;
@@ -429,7 +431,10 @@ impl BitfinityEvmClient {
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: 0,
             blob_params: Default::default(),
-            bitfinity_evm_url: Some(rpc),
+            bitfinity_spec: BitfinitySpec {
+                rpc_url: rpc.clone(),
+                send_transaction_url: None,
+            },
         };
 
         tracing::info!("downloaders::bitfinity_evm_client - Bitfinity chain_spec: {:?}", spec);

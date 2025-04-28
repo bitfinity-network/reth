@@ -339,7 +339,7 @@ pub async fn start_reth_node(
     node_config.dev.dev = false;
 
     let mut chain = node_config.chain.as_ref().clone();
-    chain.bitfinity_evm_url = bitfinity_evm_url;
+    chain.bitfinity_spec = bitfinity_evm_url;
     let mut node_config = node_config.with_chain(chain);
 
     let database = if let Some(import_data) = import_data {

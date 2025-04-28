@@ -29,7 +29,7 @@ pub trait BitfinityEvmRpc {
         async move {
             // TODO: Expecting that client node would be the active data sorce at this time
             // it could be primary or backup URL
-            let (rpc_url, client) = get_client(&chain_spec)?;
+            let (rpc_url, client) = client(&chain_spec)?;
 
             let block_number = client.get_block_number().await.map_err(|e| {
                 internal_rpc_err(format!(
@@ -46,7 +46,7 @@ pub trait BitfinityEvmRpc {
     fn btf_gas_price(&self) -> impl Future<Output = RpcResult<U256>> + Send {
         let chain_spec = self.chain_spec();
         async move {
-            let (rpc_url, client) = get_client(&chain_spec)?;
+            let (rpc_url, client) = client(&chain_spec)?;
 
             let gas_price = client.gas_price().await.map_err(|e| {
                 internal_rpc_err(format!(
@@ -63,7 +63,7 @@ pub trait BitfinityEvmRpc {
     fn btf_max_priority_fee_per_gas(&self) -> impl Future<Output = RpcResult<U256>> + Send {
         let chain_spec = self.chain_spec();
         async move {
-            let (rpc_url, client) = get_client(&chain_spec)?;
+            let (rpc_url, client) = client(&chain_spec)?;
 
             let priority_fee = client.max_priority_fee_per_gas().await.map_err(|e| {
                 internal_rpc_err(format!(
@@ -84,7 +84,7 @@ pub trait BitfinityEvmRpc {
         let chain_spec = self.chain_spec();
 
         async move {
-            let (rpc_url, client) = get_client(&chain_spec)?;
+            let (rpc_url, client) = client(&chain_spec)?;
             let Some(tx) = client.get_transaction_by_hash(hash.into()).await.map_err(|e| {
                 internal_rpc_err(format!(
                     "failed to forward eth_transactionByHash request to {}: {}",
@@ -106,9 +106,10 @@ pub trait BitfinityEvmRpc {
                     .map_err(|e| internal_rpc_err(format!("failed to decode BitfinityEvmRpc::Transaction from received did::Transaction: {e}")))?;
 
             let signer = self_tx.recover_signer().map_err(|err| {
-                internal_rpc_err(
-                    format!("failed to recover signer from decoded BitfinityEvmRpc::Transaction: {:?}", err)
-                )
+                internal_rpc_err(format!(
+                    "failed to recover signer from decoded BitfinityEvmRpc::Transaction: {:?}",
+                    err
+                ))
             })?;
             let recovered_tx = Recovered::new_unchecked(self_tx, signer);
 
@@ -135,7 +136,7 @@ pub trait BitfinityEvmRpc {
     fn btf_send_raw_transaction(&self, tx: Bytes) -> impl Future<Output = RpcResult<B256>> + Send {
         let chain_spec = self.chain_spec();
         async move {
-            let (rpc_url, client) = get_client(&chain_spec)?;
+            let (rpc_url, client) = send_transaction_client(&chain_spec)?;
 
             let tx_hash = client.send_raw_transaction_bytes(&tx).await.map_err(|e| {
                 internal_rpc_err(format!(
@@ -152,7 +153,7 @@ pub trait BitfinityEvmRpc {
     fn get_genesis_balances(&self) -> impl Future<Output = RpcResult<Vec<(Address, U256)>>> + Send {
         let chain_spec = self.chain_spec();
         async move {
-            let (rpc_url, client) = get_client(&chain_spec)?;
+            let (rpc_url, client) = client(&chain_spec)?;
 
             let balances = client.get_genesis_balances().await.map_err(|e| {
                 internal_rpc_err(format!(
@@ -171,7 +172,7 @@ pub trait BitfinityEvmRpc {
     ) -> impl Future<Output = RpcResult<CertifiedResult<Block<H256>>>> + Send {
         let chain_spec = self.chain_spec();
         async move {
-            let (rpc_url, client) = get_client(&chain_spec)?;
+            let (rpc_url, client) = client(&chain_spec)?;
 
             let certified_block = client.get_last_certified_block().await.map_err(|e| {
                 internal_rpc_err(format!(
@@ -186,8 +187,20 @@ pub trait BitfinityEvmRpc {
 }
 
 /// Returns a client for the Bitfinity EVM RPC.
-fn get_client(chain_spec: &ChainSpec) -> RpcResult<(&String, EthJsonRpcClient<ReqwestClient>)> {
-    let Some(rpc_url) = &chain_spec.bitfinity_evm_url else {
+fn client(chain_spec: &ChainSpec) -> RpcResult<(&String, EthJsonRpcClient<ReqwestClient>)> {
+    let rpc_url = &chain_spec.bitfinity_spec.rpc_url;
+
+    let client = ethereum_json_rpc_client::EthJsonRpcClient::new(
+        ethereum_json_rpc_client::reqwest::ReqwestClient::new(rpc_url.to_string()),
+    );
+
+    Ok((&rpc_url, client))
+}
+
+fn send_transaction_client(
+    chain_spec: &ChainSpec,
+) -> RpcResult<(&String, EthJsonRpcClient<ReqwestClient>)> {
+    let Some(rpc_url) = &chain_spec.bitfinity_spec.send_transaction_url else {
         return Err(internal_rpc_err("bitfinity_evm_url not found in chain spec"));
     };
 
