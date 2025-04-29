@@ -176,8 +176,9 @@ impl<
 
         let chain = {
             let mut chain = reth_downloaders::bitfinity_evm_client::BitfinityEvmClient::fetch_chain_spec_with_fallback(bitfinity.rpc_url.to_owned(), bitfinity.backup_rpc_url.clone()).await?;
+
             if let Some(send_raw_transaction_rpc_url) = &bitfinity.send_raw_transaction_rpc_url {
-                chain.bitfinity_evm_url = Some(send_raw_transaction_rpc_url.to_owned());
+                chain.bitfinity_spec.send_transaction_url = Some(send_raw_transaction_rpc_url.to_owned());
             }
             Arc::new(chain)
         };

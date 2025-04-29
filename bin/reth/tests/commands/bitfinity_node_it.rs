@@ -14,6 +14,7 @@ use reth::{
     args::{DatadirArgs, RpcServerArgs},
     dirs::{DataDirPath, MaybePlatformPath},
 };
+use reth_chainspec::bitfinity_spec::BitfinitySpec;
 use reth_consensus::FullConsensus;
 use reth_db::test_utils::TempDatabase;
 use reth_db::DatabaseEnv;
@@ -339,7 +340,10 @@ pub async fn start_reth_node(
     node_config.dev.dev = false;
 
     let mut chain = node_config.chain.as_ref().clone();
-    chain.bitfinity_evm_url = bitfinity_evm_url;
+    chain.bitfinity_spec = BitfinitySpec {
+        rpc_url: bitfinity_evm_url.to_owned().unwrap_or_default(),
+        send_transaction_url: Some(bitfinity_evm_url.unwrap_or_default()),
+    };
     let mut node_config = node_config.with_chain(chain);
 
     let database = if let Some(import_data) = import_data {
