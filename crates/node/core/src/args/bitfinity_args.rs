@@ -115,4 +115,8 @@ pub struct BitfinityResetEvmStateArgs {
     /// Single accounts bigger than this value will be split in multiple requests.
     #[arg(long, default_value = "500000")]
     pub max_account_request_bytes: usize,
+
+    /// Last block to reset the EVM to.
+    #[arg(long, short = 'e', value_name = "END_BLOCK")]
+    pub end_block: Option<u64>,
 }

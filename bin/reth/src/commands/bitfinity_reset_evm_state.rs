@@ -66,17 +66,12 @@ impl BitfinityResetEvmStateCommandBuilder {
 
         let data_dir = self.datadir.unwrap_or_chain_default(chain.chain, DatadirArgs::default());
         let db_path = data_dir.db();
-        let db = Arc::new(init_db(db_path, Default::default())?);
+        let db: Arc<DatabaseEnv> = Arc::new(init_db(db_path, Default::default())?);
         let provider_factory: BitfinityResetEvmProviderFactory = ProviderFactory::new(
             db,
             chain,
             StaticFileProvider::read_write(data_dir.static_files())?,
         );
-        // let provider_factory = ProviderFactory::new(
-        //     db,
-        //     chain,
-        //     StaticFileProvider::read_write(data_dir.static_files())?,
-        // );
 
         Ok(BitfinityResetEvmStateCommand::new(
             provider_factory,
@@ -84,6 +79,7 @@ impl BitfinityResetEvmStateCommandBuilder {
             self.bitfinity.parallel_requests,
             self.bitfinity.max_request_bytes,
             self.bitfinity.max_account_request_bytes,
+            self.bitfinity.end_block,
         ))
     }
 }
@@ -96,6 +92,7 @@ pub struct BitfinityResetEvmStateCommand {
     parallel_requests: usize,
     max_request_bytes: usize,
     max_account_request_bytes: usize,
+    end_block: Option<u64>,
 }
 
 impl BitfinityResetEvmStateCommand {
@@ -106,6 +103,7 @@ impl BitfinityResetEvmStateCommand {
         parallel_requests: usize,
         max_request_bytes: usize,
         max_account_request_bytes: usize,
+        end_block: Option<u64>,
     ) -> Self {
         Self {
             provider_factory,
@@ -113,13 +111,122 @@ impl BitfinityResetEvmStateCommand {
             parallel_requests: parallel_requests.max(1),
             max_request_bytes,
             max_account_request_bytes,
+            end_block,
         }
+    }
+
+    /// Execute `import` command
+    pub async fn import_up_to(self) -> eyre::Result<()> {
+        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
+
+        if self.no_state {
+            info!(target: "reth::cli", "Disabled stages requiring state");
+        }
+
+        debug!(target: "reth::cli",
+            chunk_byte_len=self.chunk_len.unwrap_or(DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE),
+            "Chunking chain import"
+        );
+
+        let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
+
+        let components = components(provider_factory.chain_spec());
+        let executor = components.executor().clone();
+        let consensus = Arc::new(components.consensus().clone());
+        info!(target: "reth::cli", "Consensus engine initialized");
+
+        // open file
+        let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
+
+        let mut total_decoded_blocks = 0;
+        let mut total_decoded_txns = 0;
+
+        let mut sealed_header = provider_factory
+            .sealed_header(provider_factory.last_block_number()?)?
+            .expect("should have genesis");
+
+        while let Some(file_client) =
+            reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
+        {
+            // create a new FileClient from chunk read from file
+            info!(target: "reth::cli",
+                "Importing chain file chunk"
+            );
+
+            let tip = file_client.tip().ok_or(eyre::eyre!("file client has no tip"))?;
+            info!(target: "reth::cli", "Chain file chunk read");
+
+            total_decoded_blocks += file_client.headers_len();
+            total_decoded_txns += file_client.total_transactions();
+
+            let (mut pipeline, events) = build_import_pipeline(
+                &config,
+                provider_factory.clone(),
+                &consensus,
+                Arc::new(file_client),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+                self.no_state,
+                executor.clone(),
+            )?;
+
+            // override the tip
+            pipeline.set_tip(tip);
+            debug!(target: "reth::cli", ?tip, "Tip manually set");
+
+            let provider = provider_factory.provider()?;
+
+            let latest_block_number =
+                provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
+            tokio::spawn(reth_node_events::node::handle_events(None, latest_block_number, events));
+
+            // Run pipeline
+            info!(target: "reth::cli", "Starting sync pipeline");
+            tokio::select! {
+                res = pipeline.run() => res?,
+                _ = tokio::signal::ctrl_c() => {},
+            }
+
+            sealed_header = provider_factory
+                .sealed_header(provider_factory.last_block_number()?)?
+                .expect("should have genesis");
+        }
+
+        let provider = provider_factory.provider()?;
+
+        let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
+        let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+
+        if total_decoded_blocks != total_imported_blocks
+            || total_decoded_txns != total_imported_txns
+        {
+            error!(target: "reth::cli",
+                total_decoded_blocks,
+                total_imported_blocks,
+                total_decoded_txns,
+                total_imported_txns,
+                "Chain was partially imported"
+            );
+        }
+
+        info!(target: "reth::cli",
+            total_imported_blocks,
+            total_imported_txns,
+            "Chain file imported"
+        );
+
+        Ok(())
     }
 
     /// Execute the command
     pub async fn execute(&self) -> eyre::Result<()> {
+        let db = self.provider_factory.into_db();
         let mut provider = self.provider_factory.provider()?;
-        let last_block_number = provider.last_block_number()?;
+
+        let last_block_number = match self.last_block {
+            Some(block) => block,
+            None => provider.last_block_number()?,
+        };
+
         let last_block =
             provider.block_by_number(last_block_number)?.expect("Block should be present");
 
