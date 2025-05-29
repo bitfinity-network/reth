@@ -313,7 +313,7 @@ mod tests {
     }
 
     // /// Tests that the log directory is parsed correctly when using the node command. It's
-    // /// always tied to the specific chain's name.    
+    // /// always tied to the specific chain's name.
     // #[test]
     // fn parse_logs_path_node() {
     //     let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();

@@ -1,4 +1,8 @@
+use std::path::PathBuf;
+
 use clap::{arg, Args};
+
+use crate::dirs::{DataDirPath, MaybePlatformPath};
 
 /// Public key of the IC main net.
 /// IC advices to use a hardcoded value instead of querying it to avoid main-in-the middle attacks.
@@ -119,4 +123,12 @@ pub struct BitfinityResetEvmStateArgs {
     /// Last block to reset the EVM to.
     #[arg(long, short = 'e', value_name = "END_BLOCK")]
     pub end_block: Option<u64>,
+
+    /// Directory where the import data will be read from.
+    #[arg(long, value_name = "BLOCK_DIR", default_value = "bitfinity_import")]
+    pub block_dir: Option<PathBuf>,
+
+    /// Directory where the EVM state will be stored.
+    #[arg(long, value_name = "WRKDIR", default_value = "wrkdir")]
+    pub workdir: MaybePlatformPath<DataDirPath>,
 }
