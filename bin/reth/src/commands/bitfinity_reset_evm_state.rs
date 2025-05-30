@@ -118,7 +118,7 @@ impl BitfinityResetEvmStateCommandBuilder {
             "Initialized workdir with genesis block",
         );
 
-        let wrkdir_config = if let (Some(block_dir), Some(end_block)) =
+        let import_up_to_config = if let (Some(block_dir), Some(end_block)) =
             (self.bitfinity.block_dir, self.bitfinity.end_block)
         {
             let wrkdir_db_path = wrkdir.db();
@@ -148,7 +148,7 @@ impl BitfinityResetEvmStateCommandBuilder {
             self.bitfinity.parallel_requests,
             self.bitfinity.max_request_bytes,
             self.bitfinity.max_account_request_bytes,
-            wrkdir_config,
+            import_up_to_config,
         ))
     }
 }
